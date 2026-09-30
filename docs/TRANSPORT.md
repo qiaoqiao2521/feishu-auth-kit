@@ -8,6 +8,47 @@ The WebSocket worker requires Linux flock/inotify and the pinned lark-oapi 1.7.3
 websockets 15.0.1 versions: it uses private SDK connection/loop hooks. Run it in a
 dedicated process; upgrading the SDK requires validating those hooks.
 
+## Normal authenticated CLI execution (no credential extraction)
+
+When the host's normal official CLI already owns its encrypted profile, prefer
+`TransportSender(store, request_executor=backend, timeout=20)`. No token provider
+is called, no profile file is read/decrypted, and no app secret or tenant token
+is exported. The backend implements `RequestExecutor`:
+
+- `backend.app_id`: the existing independently verified profile app.
+- `backend.request(method, url, **kwargs)`: invoke the normal authorized CLI/API
+  execution path using that existing profile. Parameters include JSON body,
+  query params, timeout and redirect policy; `headers` is empty in executor mode.
+- Return an object with `status_code` and `json()` exposing the ordinary Feishu
+  response envelope. Adapt the normal CLI response shape in the host backend.
+- Preserve JSON `uuid`, text, reply endpoint and `reply_in_thread` exactly; bound
+  subprocess time, disable message-send retries, and propagate timeout/disconnect.
+  Never read/decrypt auth config or print raw CLI outputs/credentials.
+
+The kit persists the operation/UUID before calling request, and maps executor
+interruption or uncertainty to `unknown`. Auth rejection is `failed` without
+replaying the message. The host chooses its CLI's supported API syntax; no
+unverified third-party command is hardcoded in this kit.
+
+```python
+# backend calls the host's normal official CLI with its existing profile.
+sender = TransportSender(store, request_executor=backend, timeout=20)
+result = sender.send("stable-operation", "Synthetic reply",
+                     reply_to="om_SYNTHETICREAD", reply_in_thread=True)
+```
+
+```bash
+feishu-transport send --executor host_adapter:request_executor \
+  --store-factory host_adapter:operation_store --operation stable-operation \
+  --text-file /tmp/synthetic-reply.txt --reply-to om_SYNTHETICREAD --reply-in-thread
+```
+
+`--executor` and `--provider` are mutually exclusive. This boundary reuses the
+host's authorized CLI authentication; it does not bypass a denied low-level
+credential/profile read. No new bot, identity switch or credential migration is
+needed. WebSocket credentials remain a separate capability: executor mode does
+not extract them to start a new SDK connection.
+
 ## Existing host CLI/profile authentication
 
 No registration, profile switching, cloud credentials or cloud encryption key

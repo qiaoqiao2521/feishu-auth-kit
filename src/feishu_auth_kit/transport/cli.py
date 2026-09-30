@@ -21,15 +21,19 @@ def main(argv=None):
     parser.add_argument("--operation", required=True)
     parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--store-factory", help="Host durable store module:factory")
-    parser.add_argument("--provider", help="Existing host profile token provider module:factory")
+    auth = parser.add_mutually_exclusive_group()
+    auth.add_argument("--provider", help="Existing host token provider module:factory")
+    auth.add_argument(
+        "--executor", help="Normal authenticated host CLI request backend module:factory"
+    )
     parser.add_argument("--text-file", type=Path)
     parser.add_argument("--reply-to")
     parser.add_argument("--reply-in-thread", action="store_true")
     parser.add_argument("--target-chat")
     parser.add_argument("--timeout", type=float, default=20)
     args = parser.parse_args(argv)
-    if args.action == "send" and (not args.provider or not args.text_file):
-        parser.error("send requires --provider and --text-file")
+    if args.action == "send" and (not (args.provider or args.executor) or not args.text_file):
+        parser.error("send requires --provider or --executor, and --text-file")
     import requests
 
     session = requests.Session()
@@ -39,14 +43,19 @@ def main(argv=None):
         store = (
             factory(args.store_factory) if args.store_factory else EncryptedStore(args.state_dir)
         )
-        provider = (
-            factory(args.provider)
-            if args.action == "send"
-            else SimpleNamespace(app_id=store.read("bot")["app_id"])
-        )
-        sender = TransportSender(
-            store, auth_provider=provider, session=session, timeout=args.timeout
-        )
+        if args.action == "send" and args.executor:
+            sender = TransportSender(
+                store, request_executor=factory(args.executor), timeout=args.timeout
+            )
+        else:
+            provider = (
+                factory(args.provider)
+                if args.action == "send"
+                else SimpleNamespace(app_id=store.read("bot")["app_id"])
+            )
+            sender = TransportSender(
+                store, auth_provider=provider, session=session, timeout=args.timeout
+            )
         if args.action == "send":
             text = args.text_file.read_text(encoding="utf-8")
             result = sender.send(

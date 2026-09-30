@@ -216,7 +216,9 @@ def send_once(
     if rejected_code in {99991663, 99991664, 99991665, 99991666, 99991668}:
         refreshed = False
         try:
-            transport._headers(rejected_token=headers["Authorization"][7:])
+            transport._headers(
+                rejected_token=headers.get("Authorization", "Bearer host-executor")[7:]
+            )
             refreshed = True
         except Exception:
             pass

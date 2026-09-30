@@ -47,3 +47,7 @@ includes host scheduling and model execution; transport timing is not an end-to-
 - Idle send sample (8.262 s with 0 ms auth) disproves stable subsecond POST claims.
   The supplied subsequent single-group @/reply evidence validates the original cloud
   runtime only; destination-host packaged revision still needs Ops validation.
+
+- Credential-free RequestExecutor delegates normal authenticated CLI/API execution
+  to the host. The kit persists UUID first and never consumes raw profile secrets;
+  a denied low-level profile read is not a reason to bypass that boundary.

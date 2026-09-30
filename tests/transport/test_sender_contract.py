@@ -245,7 +245,8 @@ def test_concurrent_operation_single_dispatch(configured):
     assert sender.status("op_CONCURRENT")["status"] == "sent"
 
 
-def test_cli_thread_profile_and_secret_redaction(configured, tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("mode", ["provider", "executor"])
+def test_cli_thread_profile_and_secret_redaction(configured, tmp_path, monkeypatch, capsys, mode):
     import sys
 
     from feishu_auth_kit.transport.cli import main
@@ -255,7 +256,13 @@ def test_cli_thread_profile_and_secret_redaction(configured, tmp_path, monkeypat
     binding["chat_seen_ids"] = ["om_SYNTHETICREAD"]
     store.write("binding", binding)
     monkeypatch.setitem(
-        sys.modules, "synthetic_host", NS(provider=lambda: provider, store=lambda: store)
+        sys.modules,
+        "synthetic_host",
+        NS(
+            provider=lambda: provider,
+            store=lambda: store,
+            executor=lambda: NS(app_id=provider.app_id, request=request),
+        ),
     )
     request = Mock(
         return_value=NS(
@@ -294,3 +301,59 @@ def test_cli_thread_profile_and_secret_redaction(configured, tmp_path, monkeypat
     assert "SYNTHETIC_PRIVATE_TEXT" not in output and "SYNTHETIC_TOKEN_ONLY" not in output
     assert request.call_args.kwargs["json"]["reply_in_thread"] is True
     session.close.assert_called_once()
+
+
+def test_normal_cli_executor_requires_no_token_or_secret(configured):
+    store, _, _, _ = configured
+    requests = []
+
+    class Backend:
+        app_id = "cli_SYNTHETICAPP"
+
+        def request(self, method, url, **kwargs):
+            # The host implementation invokes its normal official CLI, rather
+            # than reading/decrypting profile config or extracting credentials.
+            assert kwargs["headers"] == {}
+            assert "op_EXECUTOR" in store.read("binding")["chat_deliveries"]
+            assert (
+                store.read("binding")["chat_deliveries"]["op_EXECUTOR"]["uuid"]
+                == kwargs["json"]["uuid"]
+            )
+            requests.append((method, kwargs))
+            return NS(
+                status_code=200,
+                json=lambda: {
+                    "code": 0,
+                    "data": {
+                        "message_id": "om_SYNTHETICEXECUTOR",
+                        "chat_id": "oc_SYNTHETICPRIVATE",
+                    },
+                },
+            )
+
+    sender = TransportSender(store, request_executor=Backend())
+    assert sender.send("op_EXECUTOR", "SYNTHETIC")["status"] == "sent"
+    assert sender.send("op_EXECUTOR", "SYNTHETIC")["repeat_blocked"]
+    assert len(requests) == 1
+    assert not store.exists("tenant_tokens") and "app_secret" not in store.read("bot")
+
+
+def test_executor_timeout_unknown_without_cli_replay(configured):
+    store, _, _, _ = configured
+    backend = NS(app_id="cli_SYNTHETICAPP", request=Mock(side_effect=TimeoutError()))
+    sender = TransportSender(store, request_executor=backend)
+    assert sender.send("op_EXECUTOR", "SYNTHETIC")["status"] == "unknown"
+    assert sender.send("op_EXECUTOR", "SYNTHETIC")["status"] == "unknown"
+    assert backend.request.call_count == 1
+
+
+def test_executor_thread_reply_is_preserved(configured):
+    store, _, session, _ = configured
+    binding = store.read("binding")
+    binding["chat_seen_ids"] = ["om_SYNTHETICREAD"]
+    store.write("binding", binding)
+    backend = NS(app_id="cli_SYNTHETICAPP", request=session.request)
+    sender = TransportSender(store, request_executor=backend)
+    sender.send("op_EXECUTOR", "SYNTHETIC", reply_to="om_SYNTHETICREAD", reply_in_thread=True)
+    assert backend.request.call_args.kwargs["json"]["reply_in_thread"] is True
+    assert backend.request.call_args.kwargs["headers"] == {}

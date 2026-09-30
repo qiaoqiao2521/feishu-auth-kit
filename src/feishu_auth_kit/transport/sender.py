@@ -1,6 +1,7 @@
 """Host-profile authentication and a durable, four-state text-send contract."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Protocol
 
 from .chat_io import binding_lock, send_once
@@ -20,6 +21,29 @@ class OperationStore(Protocol):
     def read(self, name: str) -> dict: ...
     def write(self, name: str, value: dict) -> None: ...
     def exists(self, name: str) -> bool: ...
+
+
+class RequestExecutor(Protocol):
+    """Normal authenticated host CLI/API execution without exposing tokens.
+
+    app_id identifies the independently verified existing profile. request uses
+    the requests.Session shape and returns status_code/json(), while the host
+    backend owns authentication, subprocess bounds and response parsing. It must
+    disable retries for message POST, preserve UUID and reply_in_thread, and
+    never print credentials, CLI raw output, request text or remote errors.
+    """
+
+    app_id: str
+
+    def request(self, method: str, url: str, **kwargs): ...
+
+
+class _ExecutorTransport(OwnerOnlyTransport):
+    def _headers(self, *, rejected_token=None):
+        self.last_auth_cache = "host_executor"
+        if rejected_token is not None:
+            raise BridgeError("Host executor owns authentication recovery")
+        return {}
 
 
 def bind_verified_profile(store: OperationStore, binding, *, brand="feishu"):
@@ -63,14 +87,32 @@ class TransportSender:
     cache/storage. The sender never changes profiles or copies credentials.
     """
 
-    def __init__(self, store: OperationStore, *, auth_provider, session, timeout=20):
+    def __init__(
+        self,
+        store: OperationStore,
+        *,
+        auth_provider=None,
+        session=None,
+        request_executor: RequestExecutor | None = None,
+        timeout=20,
+    ):
         from .realtime_io import verified_identity
 
         bot, _ = verified_identity(store)
         if not 0 < timeout < 30:
             raise ValueError("Send timeout must be positive and below host 30-second limit")
         self.store = store
-        self.transport = OwnerOnlyTransport(
+        if request_executor is not None:
+            if auth_provider is not None or session is not None:
+                raise ValueError("Choose request_executor or auth_provider/session")
+            auth_provider = SimpleNamespace(app_id=request_executor.app_id)
+            session = request_executor
+            transport_class = _ExecutorTransport
+        else:
+            if auth_provider is None or session is None:
+                raise ValueError("An existing auth provider and session are required")
+            transport_class = OwnerOnlyTransport
+        self.transport = transport_class(
             auth_client=auth_provider,
             session=session,
             app_id=bot["app_id"],

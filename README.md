@@ -63,8 +63,8 @@ ControlMesh、Claude Code、OpenClaw，或者自定义脚本，都可以复用�
 
 - 它不是 ControlMesh 本体。
 - 它不是完整的飞书 bot framework。
-- 它不是飞书 sender。
-- 它不是 callback server。
+- 基础 auth API 不启动 sender；可选 Python transport 提供持久 HTTPS 发送与 WebSocket 入站。
+- 它不是 callback server；宿主提供自己的处理、路由和监督逻辑。
 - 它不是 session router 或 conversation store。
 - 它不会绕过 Feishu/Lark 平台策略、租户审批、应用审核或发布要求。
 - 它不会假装官方飞书流程不存在。
@@ -92,6 +92,13 @@ scan-to-create 走的仍然是官方 Feishu/Lark 注册面。它能把 bot/app �
 - callback endpoint 与卡片点击接入
 - 长时 session memory 与 routing policy
 - transport-specific retry 与生产部署问题
+
+## 可选实时 Transport
+
+Python/Linux 宿主可安装 `.[transport]`，复用已有 CLI profile 的 token provider，
+使用持久 operation/UUID 防重复发送、明确的 `pending/sent/unknown/failed` 状态，
+以及 owner 私聊/单群结构化 @ ACL。线程回复与原始线程路由字段可显式传递。
+现有 Python/TypeScript 认证接口保持兼容。见 [Transport API 与恢复说明](docs/TRANSPORT.md)。
 
 ## 开发安装
 
@@ -375,8 +382,8 @@ feishu-auth-kit agent action-to-retry \
 - 一个 `feishu-auth-kit.native-retry-request.v1`
 - 一个 `feishu-auth-kit.synthetic-retry.v1`
 
-这个仓库仍然不包含真正的 Feishu sender 或 callback server。像 ControlMesh 这类
-宿主 runtime 可以在后面消费这些 contract。
+基础认证层只构造这些 contract；可选 transport 提供消息传输。像 ControlMesh 这类
+宿主 runtime 负责 callback ingress、运行调度与会话管理。
 
 ## Auth Orchestration
 

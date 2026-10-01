@@ -121,6 +121,8 @@ feishu-transport status --store-factory host_adapter:operation_store \
 Factories take no arguments and use the host's secure configuration. `--state-dir`
 selects the optional encrypted-store implementation when `--store-factory` is
 absent. CLI output excludes reply text, provider tokens and remote error bodies.
+Failed attempted requests retain their own status/error; prior delivery metadata
+is returned separately as `operation_status`, never substituted for current success.
 `--reply-in-thread` defaults to false, requires `reply_to`, and participates in
 the operation fingerprint alongside text, destination and reply target. Changing
 any of these under an existing operation is rejected before another POST.

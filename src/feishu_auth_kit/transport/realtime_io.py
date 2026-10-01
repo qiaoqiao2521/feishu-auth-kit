@@ -21,6 +21,7 @@ import sqlite3
 import struct
 import threading
 import time
+from contextlib import ExitStack
 from types import SimpleNamespace
 
 from .binding import baseline_ids, binding_verified, owner_verified, private_chat_id
@@ -414,119 +415,127 @@ def read_queued(store, events, *, auth_provider=None):
 
 
 def listen(store, *, use_environment_proxy=False, credentials_provider=None):
-    os.umask(0o077)
-    bot, chat_id = verified_identity(store)
-    folder = store.private / "realtime"
-    _private_dir(folder)
-    fd = os.open(folder / "listener.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        raise BridgeError("A listener is already running") from None
-    queue = EventQueue(store, bot, chat_id)
-    queue.set_state("starting")
-    import lark_oapi as lark
-    import lark_oapi.ws.client as ws_module
-    import requests
-    from lark_oapi.core.log import logger
+    with ExitStack() as cleanup:
+        bot, chat_id = verified_identity(store)
+        folder = store.private / "realtime"
+        _private_dir(folder)
+        fd = os.open(folder / "listener.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        cleanup.callback(os.close, fd)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise BridgeError("A listener is already running") from None
+        queue = EventQueue(store, bot, chat_id)
+        cleanup.callback(queue.db.close)
+        cleanup.callback(queue.set_state, "stopped")
+        queue.set_state("starting")
+        import lark_oapi as lark
+        import lark_oapi.ws.client as ws_module
+        import requests
+        from lark_oapi.core.log import logger
 
-    logger.disabled = True
+        previous_logger_disabled = logger.disabled
+        cleanup.callback(setattr, logger, "disabled", previous_logger_disabled)
+        logger.disabled = True
 
-    handshake_session = requests.Session()
-    handshake_session.trust_env = use_environment_proxy
-    original_requests = ws_module.requests
-    original_connect_kwargs = ws_module._ws_connect_kwargs
+        handshake_session = requests.Session()
+        cleanup.callback(handshake_session.close)
+        handshake_session.trust_env = use_environment_proxy
+        original_requests = ws_module.requests
+        original_connect_kwargs = ws_module._ws_connect_kwargs
+        cleanup.callback(setattr, ws_module, "requests", original_requests)
+        cleanup.callback(setattr, ws_module, "_ws_connect_kwargs", original_connect_kwargs)
 
-    def bounded_post(url, **kwargs):
-        kwargs.update(timeout=(10, 20), allow_redirects=False)
-        return handshake_session.post(url, **kwargs)
+        def bounded_post(url, **kwargs):
+            kwargs.update(timeout=(10, 20), allow_redirects=False)
+            return handshake_session.post(url, **kwargs)
 
-    ws_module.requests = SimpleNamespace(post=bounded_post)
-    # Opt in only when this host already has a trusted environment proxy route.
-    # No environment, network, security or proxy configuration is changed.
-    ws_module._ws_connect_kwargs = lambda: {"proxy": True if use_environment_proxy else None}
+        ws_module.requests = SimpleNamespace(post=bounded_post)
+        # Opt in only when this host already has a trusted environment proxy route.
+        # No environment, network, security or proxy configuration is changed.
+        ws_module._ws_connect_kwargs = lambda: {"proxy": True if use_environment_proxy else None}
 
-    def callback(data):
-        received = time.time_ns() // 1_000_000
-        metadata = queue.receive(json.loads(lark.JSON.marshal(data)), received)
-        if metadata:
-            print(json.dumps({"status": "owner_event", **metadata}), flush=True)
+        def callback(data):
+            received = time.time_ns() // 1_000_000
+            metadata = queue.receive(json.loads(lark.JSON.marshal(data)), received)
+            if metadata:
+                print(json.dumps({"status": "owner_event", **metadata}), flush=True)
 
-    handler = (
-        lark.EventDispatcherHandler.builder("", "")
-        .register_p2_im_message_receive_v1(callback)
-        .build()
-    )
-    started = time.monotonic()
+        handler = (
+            lark.EventDispatcherHandler.builder("", "")
+            .register_p2_im_message_receive_v1(callback)
+            .build()
+        )
+        started = time.monotonic()
 
-    class CloudClient(lark.ws.Client):
-        async def _connect(self):
-            await super()._connect()
-            queue.set_state("connected")
+        class CloudClient(lark.ws.Client):
+            async def _connect(self):
+                await super()._connect()
+                queue.set_state("connected")
+                print(
+                    json.dumps(
+                        {
+                            "status": "connected",
+                            "startup_ms": round((time.monotonic() - started) * 1000),
+                            "last_seq": queue.status()["last_seq"],
+                        }
+                    ),
+                    flush=True,
+                )
+
+        credentials = credentials_provider() if credentials_provider else bot
+        if credentials.get("app_id") != bot["app_id"] or not credentials.get("app_secret"):
+            raise BridgeError("WebSocket credentials must match the verified host app")
+        client = CloudClient(
+            credentials["app_id"],
+            credentials["app_secret"],
+            event_handler=handler,
+            domain=DOMAINS[bot["brand"]],
+            log_level=lark.LogLevel.ERROR,
+            auto_reconnect=True,
+        )
+        client.on_reconnecting = lambda: queue.set_state("reconnecting")
+        loop = ws_module.loop
+        stop = asyncio.Event()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, stop.set)
+            cleanup.callback(loop.remove_signal_handler, sig)
+
+        def loop_error(loop, context):
+            queue.set_state("error")
             print(
                 json.dumps(
-                    {
-                        "status": "connected",
-                        "startup_ms": round((time.monotonic() - started) * 1000),
-                        "last_seq": queue.status()["last_seq"],
-                    }
+                    {"status": "async_error", "error_type": type(context.get("exception")).__name__}
                 ),
                 flush=True,
             )
+            stop.set()
 
-    credentials = credentials_provider() if credentials_provider else bot
-    if credentials.get("app_id") != bot["app_id"] or not credentials.get("app_secret"):
-        raise BridgeError("WebSocket credentials must match the verified host app")
-    client = CloudClient(
-        credentials["app_id"],
-        credentials["app_secret"],
-        event_handler=handler,
-        domain=DOMAINS[bot["brand"]],
-        log_level=lark.LogLevel.ERROR,
-        auto_reconnect=True,
-    )
-    client.on_reconnecting = lambda: queue.set_state("reconnecting")
-    loop = ws_module.loop
-    stop = asyncio.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, stop.set)
+        cleanup.callback(loop.set_exception_handler, loop.get_exception_handler())
+        loop.set_exception_handler(loop_error)
 
-    def loop_error(loop, context):
-        queue.set_state("error")
-        print(
-            json.dumps(
-                {"status": "async_error", "error_type": type(context.get("exception")).__name__}
-            ),
-            flush=True,
-        )
-        stop.set()
+        async def run():
+            ping = None
+            try:
+                await asyncio.wait_for(client._connect(), 35)
+                ping = asyncio.create_task(client._ping_loop())
+                await stop.wait()
+            finally:
+                client._auto_reconnect = False
+                if ping is not None:
+                    ping.cancel()
+                await client._disconnect()
+                if ping is not None:
+                    await asyncio.gather(ping, return_exceptions=True)
 
-    loop.set_exception_handler(loop_error)
-
-    async def run():
-        await asyncio.wait_for(client._connect(), 35)
-        ping = asyncio.create_task(client._ping_loop())
+        initial_tasks = asyncio.all_tasks(loop)
         try:
-            await stop.wait()
+            loop.run_until_complete(run())
         finally:
-            client._auto_reconnect = False
-            ping.cancel()
-            await client._disconnect()
-            await asyncio.gather(ping, return_exceptions=True)
-
-    try:
-        loop.run_until_complete(run())
-    finally:
-        queue.set_state("stopped")
-        pending = asyncio.all_tasks(loop)
-        for task in pending:
-            task.cancel()
-        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        os.close(fd)
-        queue.db.close()
-        handshake_session.close()
-        ws_module.requests = original_requests
-        ws_module._ws_connect_kwargs = original_connect_kwargs
+            pending = asyncio.all_tasks(loop) - initial_tasks
+            for task in pending:
+                task.cancel()
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
 
 
 def main():

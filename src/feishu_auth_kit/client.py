@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import threading
+import time
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlencode
@@ -51,6 +54,9 @@ class FeishuAuthClient:
         self.domains = resolve_domains(brand)
         self._tenant_token: TenantAccessToken | None = None
         self._app_info: AppInfo | None = None
+        self._tenant_expires_at = 0.0
+        self._tenant_issued_at = 0.0
+        self._tenant_lock = threading.Lock()
 
     def _request_json(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         response = self.session.request(method, url, timeout=self.timeout, **kwargs)
@@ -63,20 +69,33 @@ class FeishuAuthClient:
         return payload
 
     def get_tenant_access_token(self, *, force_refresh: bool = False) -> TenantAccessToken:
-        if self._tenant_token and not force_refresh:
-            return self._tenant_token
-
-        payload = self._request_json(
-            "POST",
-            self.domains.tenant_token_url,
-            json={"app_id": self.app_id, "app_secret": self.app_secret},
-        )
-        token = TenantAccessToken(
-            token=str(payload["tenant_access_token"]),
-            expire=payload.get("expire"),
-        )
-        self._tenant_token = token
-        return token
+        with self._tenant_lock:
+            now = time.monotonic()
+            if (
+                self._tenant_token
+                and not force_refresh
+                and self._tenant_issued_at <= now < self._tenant_expires_at
+            ):
+                return self._tenant_token
+            payload = self._request_json(
+                "POST",
+                self.domains.tenant_token_url,
+                json={"app_id": self.app_id, "app_secret": self.app_secret},
+            )
+            token = TenantAccessToken(
+                token=str(payload["tenant_access_token"]), expire=payload.get("expire")
+            )
+            try:
+                lifetime = float(token.expire) if token.expire is not None else 300.0
+            except (TypeError, ValueError):
+                lifetime = 0.0
+            lifetime = min(7200.0, max(0.0, lifetime)) if math.isfinite(lifetime) else 0.0
+            # Small valid lifetimes still cache briefly; zero never becomes a fallback.
+            now = time.monotonic()
+            self._tenant_issued_at = now
+            self._tenant_expires_at = now + max(0.0, lifetime - min(60.0, lifetime * 0.1))
+            self._tenant_token = token
+            return token
 
     @staticmethod
     def parse_app_info(payload: dict[str, Any]) -> AppInfo:
@@ -152,4 +171,3 @@ class FeishuAuthClient:
             token_type=token_type,
             op_from=op_from,
         )
-

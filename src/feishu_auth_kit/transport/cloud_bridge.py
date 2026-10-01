@@ -288,7 +288,15 @@ class OwnerOnlyTransport:
         ):
             token = self.auth.get_tenant_access_token(force_refresh=True)
             self._cached_token = token.token
-            self._token_expires_at = now + max(0, int(getattr(token, "expire", None) or 300) - 60)
+            self._token_expires_at = now + max(
+                0,
+                int(
+                    getattr(token, "expire", None)
+                    if getattr(token, "expire", None) is not None
+                    else 300
+                )
+                - 60,
+            )
             self.last_auth_cache = "refreshed"
         return {"Authorization": "Bearer " + self._cached_token}
 
@@ -321,7 +329,18 @@ class OwnerOnlyTransport:
                 self.last_auth_cache = "encrypted_store"
             else:
                 token = self.auth.get_tenant_access_token(force_refresh=True)
-                lifetime = max(0, min(7200, int(getattr(token, "expire", None) or 300)) - 60)
+                lifetime = max(
+                    0,
+                    min(
+                        7200,
+                        int(
+                            getattr(token, "expire", None)
+                            if getattr(token, "expire", None) is not None
+                            else 300
+                        ),
+                    )
+                    - 60,
+                )
                 entry = {
                     "app_id": self.app_id,
                     "base": self.base,

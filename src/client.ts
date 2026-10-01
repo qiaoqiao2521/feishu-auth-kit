@@ -71,6 +71,9 @@ export class FeishuAuthClient {
 
   private tenantToken: TenantAccessToken | null = null;
   private appInfo: AppInfo | null = null;
+  private tenantIssuedAt = 0;
+  private tenantExpiresAt = 0;
+  private tenantRefresh: Promise<TenantAccessToken> | null = null;
 
   constructor(
     appId: string,
@@ -168,22 +171,26 @@ export class FeishuAuthClient {
   }
 
   async getTenantAccessToken(options?: { forceRefresh?: boolean }): Promise<TenantAccessToken> {
-    if (this.tenantToken && !options?.forceRefresh) {
+    const now = performance.now();
+    if (this.tenantToken && !options?.forceRefresh && this.tenantIssuedAt <= now && now < this.tenantExpiresAt) {
       return this.tenantToken;
     }
+    if (this.tenantRefresh) return this.tenantRefresh;
+    const refresh = this.refreshTenantToken();
+    this.tenantRefresh = refresh;
+    try { return await refresh; }
+    finally { if (this.tenantRefresh === refresh) this.tenantRefresh = null; }
+  }
 
+  private async refreshTenantToken(): Promise<TenantAccessToken> {
     const payload = await this.requestJson(this.domains.tenantTokenUrl, {
-      method: "POST",
-      body: {
-        app_id: this.appId,
-        app_secret: this.appSecret,
-      },
+      method: "POST", body: { app_id: this.appId, app_secret: this.appSecret },
     });
-
-    const token: TenantAccessToken = {
-      token: String(payload.tenant_access_token),
-      expire: payload.expire ?? null,
-    };
+    const token: TenantAccessToken = { token: String(payload.tenant_access_token), expire: payload.expire ?? null };
+    const numeric = token.expire === null ? 300 : Number(token.expire);
+    const lifetime = Number.isFinite(numeric) ? Math.min(7200, Math.max(0, numeric)) : 0;
+    this.tenantIssuedAt = performance.now();
+    this.tenantExpiresAt = this.tenantIssuedAt + Math.max(0, lifetime - Math.min(60, lifetime * 0.1)) * 1000;
     this.tenantToken = token;
     return token;
   }

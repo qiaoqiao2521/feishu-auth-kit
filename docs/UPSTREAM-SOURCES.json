@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "relationship": "Independent first-party kit extracted for ControlMesh; conceptual inspiration and selective adaptations, not a full plugin fork.",
+  "sources": [
+    {
+      "repository": "https://github.com/larksuite/openclaw-lark",
+      "local_introduction_commit": "bbfe605",
+      "kind": "conceptual_inspiration",
+      "evidence": "Initial README explicitly describes independent Python auth/onboarding implementation inspired by this plugin.",
+      "adopted_upstream_commit": null,
+      "reason_unknown": "The original repository history does not record an exact upstream inspiration snapshot."
+    },
+    {
+      "repository": "https://github.com/larksuite/openclaw-lark",
+      "local_introduction_commit": "77cf53d4233d7d9b2ef38481ca4c30f00ca386a4",
+      "kind": "selective_typescript_adaptation",
+      "adopted_upstream_commit": null,
+      "reason_unknown": "The local absorption commit does not identify the exact upstream SHA; do not infer it from release dates.",
+      "inspection_commit": "dde0be3680d6fd5443cab426c8f4b3216266346a",
+      "inspection_package_version": "2026.7.9",
+      "inspection_is_adoption_baseline": false,
+      "file_map": [
+        {"local": "src/flush-controller.ts", "upstream_inspected": "src/card/flush-controller.ts"},
+        {"local": "src/streaming-card.ts", "upstream_inspected": "src/card/streaming-card-controller.ts"},
+        {"local": "src/reactions.ts", "upstream_inspected": "src/messaging/outbound/reactions.ts"},
+        {"local": "src/interactive-dispatcher.ts", "upstream_inspected": "src/channel/interactive-dispatch.ts"}
+      ],
+      "local_differences": "Framework-neutral options/callbacks and kit auth interfaces; not a wholesale import of the OpenClaw plugin.",
+      "license_note": "Inspected upstream FlushController carries ByteDance MIT/SPDX attribution. Exact historical copied portions must be checked before restoring applicable notices; this inventory does not invent copyright ownership."
+    },
+    {
+      "repository": "https://github.com/qiaoqiao2521/ControlMesh",
+      "kind": "first_party_extraction_and_transport_protocol_reference",
+      "relationship_commit": "df17317",
+      "protocol_reference_commit": "8e2c5b95c81a919d140915b539c84d7a65daadcc",
+      "protocol_reference_files": [
+        "controlmesh/messenger/feishu/bot.py",
+        "controlmesh/messenger/feishu/media.py",
+        "controlmesh/messenger/feishu/sender.py"
+      ],
+      "evidence": "First-party relationship in local history; protocol references retained in the supplied transport handoff provenance. No complete upstream tree is vendored."
+    }
+  ],
+  "runtime_dependencies": [
+    {"package": "lark-oapi", "pinned_version": "1.7.3", "boundary": "Official SDK dependency; private WebSocket lifecycle hooks require compatibility tests before an upgrade."},
+    {"package": "websockets", "pinned_version": "15.0.1", "boundary": "Official SDK transport compatibility pin."},
+    {"package": "host_official_cli", "pinned_version": null, "boundary": "Injected RequestExecutor adapter owned by the host; profile authentication stays in its normal CLI path."}
+  ],
+  "upgrade_policy": "Watcher digests are notifications, not automatic synchronization. Record each future adopted SHA and local patch scope; run product contracts and synthetic SDK lifecycle tests before accepting an upgrade."
+}

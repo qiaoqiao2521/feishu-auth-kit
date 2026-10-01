@@ -98,7 +98,8 @@ scan-to-create 走的仍然是官方 Feishu/Lark 注册面。它能把 bot/app �
 Python/Linux 宿主可安装 `.[transport]`，复用已有 CLI profile 的 token provider，
 使用持久 operation/UUID 防重复发送、明确的 `pending/sent/unknown/failed` 状态，
 以及 owner 私聊/单群结构化 @ ACL。线程回复与原始线程路由字段可显式传递。
-现有 Python/TypeScript 认证接口保持兼容。见 [Transport API 与恢复说明](docs/TRANSPORT.md)。
+现有 Python/TypeScript 认证接口保持兼容。见 [Transport API 与恢复说明](docs/TRANSPORT.md)、
+[状态加固与迁移边界](docs/HARDENING.md)和[可审计上游来源](docs/UPSTREAM-SOURCES.json)。
 
 ## 开发安装
 

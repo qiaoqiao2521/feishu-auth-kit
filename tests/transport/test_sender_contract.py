@@ -357,3 +357,40 @@ def test_executor_thread_reply_is_preserved(configured):
     sender.send("op_EXECUTOR", "SYNTHETIC", reply_to="om_SYNTHETICREAD", reply_in_thread=True)
     assert backend.request.call_args.kwargs["json"]["reply_in_thread"] is True
     assert backend.request.call_args.kwargs["headers"] == {}
+
+
+def test_cli_error_does_not_overwrite_current_request_with_history(
+    configured, tmp_path, monkeypatch, capsys
+):
+    import sys
+
+    from feishu_auth_kit.transport.cli import main
+
+    store, _, session, sender = configured
+    sender.send("op_CLI_CONFLICT", "SYNTHETIC_FIRST")
+    backend = NS(app_id="cli_SYNTHETICAPP", request=session.request)
+    monkeypatch.setitem(
+        sys.modules, "synthetic_hardening", NS(store=lambda: store, executor=lambda: backend)
+    )
+    text = tmp_path / "reply.txt"
+    text.write_text("SYNTHETIC_DIFFERENT")
+    assert (
+        main(
+            [
+                "send",
+                "--operation",
+                "op_CLI_CONFLICT",
+                "--store-factory",
+                "synthetic_hardening:store",
+                "--executor",
+                "synthetic_hardening:executor",
+                "--text-file",
+                str(text),
+            ]
+        )
+        == 1
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "failed"
+    assert result["operation_status"]["status"] == "sent"
+    assert result["automatic_resend"] is False and session.request.call_count == 1

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from .cloud_bridge import EncryptedStore
+from .cloud_bridge import BridgeError, EncryptedStore
 from .sender import TransportSender
 
 
@@ -71,10 +71,14 @@ def main(argv=None):
         return 0
     except Exception as exc:
         # If result persistence failed after POST, return unknown conservatively.
-        result = {"status": "unknown", "automatic_resend": False, "error_type": type(exc).__name__}
+        result = {
+            "status": "failed" if isinstance(exc, BridgeError) else "unknown",
+            "automatic_resend": False,
+            "error_type": type(exc).__name__,
+        }
         if sender is not None:
             try:
-                result.update(sender.status(args.operation))
+                result["operation_status"] = sender.status(args.operation)
             except Exception:
                 pass
         print(json.dumps(result))

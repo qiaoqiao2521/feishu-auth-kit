@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 feishu-auth-kit = "feishu_auth_kit.cli:main"
+feishu-slack-bridge = "feishu_auth_kit.slack_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/feishu_auth_kit"]

@@ -138,3 +138,36 @@ published version does not automatically migrate experimental databases. Preserv
 and back up any candidate ledger, reconcile its outstanding operations, and arrange
 an explicit migration before starting this version against it. A compatible unversioned
 candidate ledger may be marked version 1 without changing its records.
+
+### Paperclip 2026.916.1 ordinary-comment generation compatibility
+
+This installed version leaves ordinary owner comments' `conversationSessionGeneration`
+null. It records the authoritative generation on the run context; `/new` separately
+writes its generation onto the reset command comment when the native reset is processed.
+The ControlMesh reference commit is not the kit deployment commit.
+
+For an explicitly null ordinary-comment generation, the adapter now uses GET-only
+recovery: validate the bound Board owner/company/issue, exact source comment and
+clientRequestId/text; inspect a bounded, unsaturated run window; require matching
+source-comment linkage, one consistent generation, an unambiguous latest successful
+run and a nonempty native/provider session receipt. It then re-reads the conversation
+and source to reject an intervening reset or source change. Missing fields, conflicting
+generations, pending/newer retries, missing session evidence and truncated windows
+remain unknown. Generation never defaults to zero or comes from the current issue.
+
+The raw comment retains null. A separate `generationEvidence` receipt carries the
+verified source/run/session chain; the existing ledger stores its source ID, verified
+native generation and run ID. No schema migration or historical record rewrite is
+needed. Before returning a final reply, the API revalidates that evidence against the
+selected successful run and explicit presentation decision. `/new` without its own
+persisted generation remains unknown until a later read sees that exact reset receipt.
+Existing local reset fences still suppress unclaimed older replies. A remote reset
+can race after the last read; this does not promise a distributed atomic send/reset
+boundary or recall of a network send already claimed.
+
+Verification used offline source/run fixtures and restart/duplicate/reset/send-failure
+tests. A read-only check against two existing production receipts resolved both to
+their original final comments without writing the ledger, sending Slack messages or
+starting runs. Deployment must preserve the existing ledger and ingress. The first
+approved pump pass can deliver already-computed results; it must not resubmit their
+source messages. No acceptance marker is created by this compatibility update.

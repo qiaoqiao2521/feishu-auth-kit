@@ -177,11 +177,12 @@ class SlackContinuityBridge:
                 if claimed.rowcount
                 else self.native.lookup_conversation()
             )
-            if not issue:
+            if (not issue or type(issue.get("conversationSessionGeneration")) is not int
+                    or issue["conversationSessionGeneration"] < 0):
                 return None
             db.execute(
                 "UPDATE binding SET issue_id=?,native_generation=?,creation='confirmed'",
-                (issue["id"], issue.get("conversationSessionGeneration", 0)),
+                (issue["id"], issue["conversationSessionGeneration"]),
             )
             return issue["id"]
         except Exception:
@@ -281,13 +282,24 @@ class SlackContinuityBridge:
 
     def _source(self, row, source):
         generation = source.get("conversationSessionGeneration")
-        if not source.get("id") or not isinstance(generation, int) or isinstance(generation, bool):
+        evidence = source.get("generationEvidence")
+        if generation is None and isinstance(evidence, dict):
+            if (evidence.get("kind") != "source_run_v1"
+                    or evidence.get("sourceId") != source.get("id")
+                    or evidence.get("clientRequestId") != row["request_id"]
+                    or evidence.get("issueId") != self.store.meta()["issue_id"]
+                    or not evidence.get("runId") or not evidence.get("sessionId")
+                    or row["is_reset"]):
+                return
+            generation = evidence.get("generation")
+        if not source.get("id") or type(generation) is not int or generation < 0:
             return
         self.store.update(
             row["request_id"],
             execution="pending",
             source_id=source["id"],
             native_generation=generation,
+            **({"run_id": evidence["runId"]} if isinstance(evidence, dict) else {}),
         )
 
     def _deliver(self, issue_id, row, event):

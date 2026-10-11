@@ -618,3 +618,75 @@ class SlackContinuityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyReceiptBridgeTests(unittest.TestCase):
+    setUp = SlackContinuityTests.setUp
+    tearDown = SlackContinuityTests.tearDown
+    restart = SlackContinuityTests.restart
+    receive = SlackContinuityTests.receive
+    row = SlackContinuityTests.row
+
+    def prepare_unknown(self):
+        self.receive("legacy")
+        self.native.submit_error = True
+        self.bridge.tick()
+        self.native.submit_error = False
+        self.native.finish("legacy")
+        source = self.native.sources["legacy"]
+        source["conversationSessionGeneration"] = None
+        source["generationEvidence"] = {
+            "kind": "source_run_v1", "sourceId": source["id"],
+            "clientRequestId": "legacy", "issueId": "coordinating-issue",
+            "runId": "run-1", "sessionId": "provider-session", "generation": 0,
+        }
+        return source
+
+    def test_restart_duplicate_receipt_recovers_without_resubmission(self):
+        source = self.prepare_unknown()
+        self.restart()
+        self.receive("legacy")
+        self.bridge.tick()
+        self.restart()
+        self.bridge.tick()
+        self.assertEqual(len(self.native.calls_of("submit")), 1)
+        self.assertEqual(len(self.sender.calls), 1)
+        self.assertEqual(self.row("legacy")["native_generation"], 0)
+        self.assertIsNone(source["conversationSessionGeneration"])
+
+    def test_unknown_send_is_not_repeated_after_legacy_recovery(self):
+        self.prepare_unknown()
+        self.sender.error = True
+        self.bridge.tick()
+        self.restart()
+        self.bridge.tick()
+        self.assertEqual(len(self.sender.calls), 1)
+        self.assertEqual(self.row("legacy")["delivery"], "unknown")
+        self.assertEqual(len(self.native.calls_of("submit")), 1)
+
+    def test_invalid_evidence_never_enters_pending(self):
+        source = self.prepare_unknown()
+        for key, value in [("generation", None), ("generation", True), ("generation", -1),
+                           ("sourceId", "foreign"), ("clientRequestId", "other"),
+                           ("issueId", "foreign"), ("sessionId", None), ("runId", None)]:
+            old = source["generationEvidence"][key]
+            source["generationEvidence"][key] = value
+            self.bridge.tick()
+            self.assertEqual(self.row("legacy")["execution"], "unknown")
+            source["generationEvidence"][key] = old
+        self.assertEqual(self.sender.calls, [])
+
+    def test_concurrent_reset_during_reconcile_suppresses_old_result(self):
+        self.prepare_unknown()
+        reconcile = self.native.reconcile
+        def reset_during_read(*args):
+            self.receive("reset", "/new")
+            return reconcile(*args)
+        self.native.reconcile = reset_during_read
+        self.bridge.tick()
+        self.assertEqual(self.sender.calls, [])
+        self.assertEqual(self.row("legacy")["delivery"], "suppressed")
+        self.native.reconcile = reconcile
+        self.restart()
+        self.bridge.tick()
+        self.assertEqual(self.sender.calls, [])

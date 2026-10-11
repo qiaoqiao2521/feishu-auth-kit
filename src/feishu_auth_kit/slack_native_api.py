@@ -170,7 +170,9 @@ class NativeChatApi:
                 or source.get("authorUserId") != self.board_user_id
                 or source.get("authorAgentId") is not None or source.get("deletedAt")
                 or not isinstance(source.get("body"), str)
-                or not _generation(source.get("conversationSessionGeneration"))):
+                or "conversationSessionGeneration" not in source
+                or (source["conversationSessionGeneration"] is not None
+                    and not _generation(source["conversationSessionGeneration"]))):
             raise NativeChatError("source_comment_identity_mismatch")
         self._response_id(source.get("id"))
         self._response_id(source.get("clientRequestId"))
@@ -193,7 +195,8 @@ class NativeChatApi:
         self._existing(issue_id)
         value = self._request("POST", "/api/issues/" + _segment(issue_id) + "/comments",
                               {"body": text, "clientRequestId": client_request_id})
-        return self._source(value, issue_id, text, client_request_id)
+        return self._source_receipt(
+            self._source(value, issue_id, text, client_request_id))
 
     def reconcile(self, issue_id, text, client_request_id, comment_id=None):
         """Read only. None means not found within an unsaturated recent window."""
@@ -207,16 +210,91 @@ class NativeChatApi:
                                   issue_id, text, client_request_id)
             if source["id"] != comment_id:
                 raise NativeChatError("source_comment_identity_mismatch")
-            return source
+            return self._source_receipt(source)
         rows = _rows(self._request("GET", path + "?order=desc&limit=200"))
         matches = [row for row in rows if row.get("clientRequestId") == client_request_id]
         if len(matches) > 1:
             raise NativeChatError("source_comment_not_unique")
         if matches:
-            return self._source(matches[0], issue_id, text, client_request_id)
+            return self._source_receipt(
+                self._source(matches[0], issue_id, text, client_request_id))
         if len(rows) >= 200:
             raise NativeChatError("source_lookup_window_exceeded")
         return None
+
+    @staticmethod
+    def _run_session(run):
+        # Provider sessions are evidence, never routing targets or new session IDs.
+        session = run.get("sessionIdAfter") or run.get("nativeSessionId")
+        if not isinstance(session, str) or not session.strip():
+            raise NativeChatError("source_session_unverified")
+        return session
+
+    def _source_receipt(self, source):
+        if source["conversationSessionGeneration"] is not None:
+            return source
+        if source["body"].strip() == "/new":
+            # 2026.916.1 writes the reset boundary to this command comment
+            # asynchronously. Only a later GET of that exact comment can confirm it.
+            raise NativeChatError("reset_generation_unverified")
+        issue_id = source["issueId"]
+        runs = _rows(self._request("GET", "/api/companies/" + _segment(self.company_id)
+                                  + "/heartbeat-runs?agentId=" + _segment(self.agent_id)
+                                  + "&limit=200&summary=true"))
+        candidates = [r for r in runs
+                      if _object(r.get("contextSnapshot", {})).get("issueId") == issue_id]
+        if len(runs) >= 200 or len(candidates) > 20:
+            raise NativeChatError("source_evidence_window_exceeded")
+        evidence = []
+        for candidate in candidates:
+            run = _object(self._request("GET", "/api/heartbeat-runs/"
+                                        + _segment(candidate.get("id"))))
+            if run.get("id") != candidate["id"]:
+                raise NativeChatError("run_identity_mismatch")
+            context = _object(run.get("contextSnapshot"))
+            coalesced = context.get("wakeCommentIds", [])
+            if not isinstance(coalesced, list) or any(not isinstance(i, str) for i in coalesced):
+                raise NativeChatError("api_invalid_schema")
+            ids = [context.get(k) for k in ("commentId", "wakeCommentId", "sourceCommentId")]
+            if source["id"] not in ids + coalesced:
+                continue
+            if (run.get("companyId") != self.company_id or run.get("agentId") != self.agent_id
+                    or context.get("issueId") != issue_id
+                    or not _generation(context.get("conversationSessionGeneration"))):
+                raise NativeChatError("source_run_identity_mismatch")
+            try:
+                stamp = datetime.fromisoformat(run["createdAt"].replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    raise ValueError()
+            except (KeyError, TypeError, AttributeError, ValueError):
+                raise NativeChatError("run_order_unverified") from None
+            evidence.append((stamp, run))
+        if not evidence:
+            raise NativeChatError("source_generation_unverified")
+        if len({stamp for stamp, _ in evidence}) != len(evidence):
+            raise NativeChatError("run_order_ambiguous")
+        generations = {r["contextSnapshot"]["conversationSessionGeneration"] for _, r in evidence}
+        if len(generations) != 1:
+            raise NativeChatError("source_generation_conflict")
+        run = max(evidence, key=lambda item: item[0])[1]
+        if run.get("status") != "succeeded":
+            raise NativeChatError("source_run_not_successful")
+        session = self._run_session(run)
+        generation = run["contextSnapshot"]["conversationSessionGeneration"]
+        # Re-read after the evidence scan: reset/concurrent source edits fail closed.
+        current = self._existing(issue_id)
+        if current["conversationSessionGeneration"] != generation:
+            raise NativeChatError("conversation_session_changed")
+        reread = self._source(self._request("GET", "/api/issues/" + _segment(issue_id)
+                                           + "/comments/" + _segment(source["id"])),
+                              issue_id, source["body"], source["clientRequestId"])
+        if reread["id"] != source["id"] or reread["conversationSessionGeneration"] is not None:
+            raise NativeChatError("source_receipt_changed")
+        return {**source, "generationEvidence": {
+            "kind": "source_run_v1", "sourceId": source["id"], "issueId": issue_id,
+            "clientRequestId": source["clientRequestId"], "runId": run["id"],
+            "sessionId": session, "generation": generation,
+        }}
 
     def status(self, issue_id, source_id, generation):
         """Read only; only explicit successful-run presentation decisions yield final."""
@@ -230,10 +308,13 @@ class NativeChatApi:
         if source["id"] != source_id:
             raise NativeChatError("source_comment_identity_mismatch")
         base = {"generation": issue["conversationSessionGeneration"]}
-        if (source["conversationSessionGeneration"] != generation
+        if ((source["conversationSessionGeneration"] is not None
+             and source["conversationSessionGeneration"] != generation)
                 or generation != issue["conversationSessionGeneration"]):
             return {**base, "state": "unknown", "code": "conversation_session_changed"}
         if source["body"].strip() == "/new":
+            if source["conversationSessionGeneration"] is None:
+                return {**base, "state": "unknown", "code": "reset_generation_unverified"}
             return {**base, "state": "reset", "text": "已开启新对话，历史记录保留。"}
         runs = _rows(self._request("GET", "/api/companies/" + _segment(self.company_id)
                                   + "/heartbeat-runs?agentId=" + _segment(self.agent_id)
@@ -299,6 +380,12 @@ class NativeChatApi:
                     or reply.get("createdByRunId") != run["id"] or reply.get("deletedAt")
                     or not isinstance(reply.get("body"), str) or not reply["body"].strip()):
                 raise NativeChatError("reply_identity_mismatch")
+            if source["conversationSessionGeneration"] is None:
+                self._run_session(run)
+                fresh = self._source_receipt(source)
+                proof = fresh["generationEvidence"]
+                if proof["runId"] != run["id"] or proof["generation"] != generation:
+                    return {**result, "state": "unknown", "code": "source_evidence_changed"}
             return {**result, "state": "final", "replyCommentId": reply["id"],
                     "text": reply["body"]}
         code = ("reply_lookup_window_exceeded" if len(issue_runs) > 20 or len(runs) >= 200

@@ -230,3 +230,139 @@ class NativeChatApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyGenerationEvidenceTests(unittest.TestCase):
+    setUp = NativeChatApiTests.setUp
+    open = NativeChatApiTests.open
+    setup_responses = NativeChatApiTests.setup_responses
+    assert_read_only = NativeChatApiTests.assert_read_only
+
+    def legacy(self):
+        return {**SOURCE, "conversationSessionGeneration": None}
+
+    def evidence_run(self, **patch):
+        return {**copy.deepcopy(RUN), "sessionIdAfter": "provider-session", **patch}
+
+    def test_reconcile_preserves_null_and_returns_separate_source_run_proof(self):
+        source, run = self.legacy(), self.evidence_run()
+        self.setup_responses([source], [run], run, ISSUE, source)
+        receipt = self.api.reconcile("issue", "hello", "request")
+        self.assertIsNone(receipt["conversationSessionGeneration"])
+        self.assertEqual(receipt["generationEvidence"], {
+            "kind": "source_run_v1", "sourceId": "source", "issueId": "issue",
+            "clientRequestId": "request", "runId": "run",
+            "sessionId": "provider-session", "generation": 0})
+        self.assert_read_only()
+
+    def test_submit_null_has_one_post_and_then_read_only_evidence(self):
+        source, run = self.legacy(), self.evidence_run()
+        self.setup_responses(source, [run], run, ISSUE, source)
+        self.assertIsNone(self.api.submit("issue", "hello", "request")
+                          ["conversationSessionGeneration"])
+        self.assertEqual(sum(method == "POST" for method, _, _ in self.calls), 1)
+        self.assertFalse(self.responses)
+
+    def test_final_rechecks_source_run_session_and_generation(self):
+        source, run = self.legacy(), self.evidence_run()
+        self.setup_responses(source, [run], run, REPLY, [run], run, ISSUE, source)
+        result = self.api.status("issue", "source", 0)
+        self.assertEqual(result["state"], "final")
+        self.assert_read_only()
+
+    def test_missing_field_is_not_legacy_null(self):
+        for value in (True, -1, "0", "missing"):
+            source = {**SOURCE, "conversationSessionGeneration": value}
+            if value == "missing":
+                del source["conversationSessionGeneration"]
+            self.setup_responses([source])
+            with self.assertRaisesRegex(NativeChatError, "source_comment_identity_mismatch"):
+                self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_null_reset_waits_for_its_own_boundary_comment(self):
+        self.setup_responses([{**self.legacy(), "body": "/new"}])
+        with self.assertRaisesRegex(NativeChatError, "reset_generation_unverified"):
+            self.api.reconcile("issue", "/new", "request")
+        source = {**SOURCE, "body": "/new", "conversationSessionGeneration": 1}
+        self.setup_responses([source], issue={**ISSUE, "conversationSessionGeneration": 1})
+        self.assertEqual(self.api.reconcile("issue", "/new", "request"), source)
+        self.assert_read_only()
+
+    def test_old_run_after_reset_cannot_borrow_current_generation(self):
+        source, run = self.legacy(), self.evidence_run()
+        new = {**ISSUE, "conversationSessionGeneration": 1}
+        self.setup_responses([source], [run], run, new, issue=new)
+        with self.assertRaisesRegex(NativeChatError, "conversation_session_changed"):
+            self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_reset_during_evidence_scan_blocks_receipt(self):
+        source, run = self.legacy(), self.evidence_run()
+        self.setup_responses([source], [run], run,
+                             {**ISSUE, "conversationSessionGeneration": 1})
+        with self.assertRaisesRegex(NativeChatError, "conversation_session_changed"):
+            self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_source_changed_during_scan_blocks_receipt(self):
+        source, run = self.legacy(), self.evidence_run()
+        self.setup_responses([source], [run], run, ISSUE,
+                             {**source, "clientRequestId": "wrong"})
+        with self.assertRaisesRegex(NativeChatError, "source_request_mismatch"):
+            self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_unrelated_run_or_no_run_never_defaults_generation(self):
+        source = self.legacy()
+        run = self.evidence_run(
+            contextSnapshot={**RUN["contextSnapshot"], "wakeCommentIds": ["other"]})
+        for values in (([],), ([run], run)):
+            self.setup_responses([source], *values)
+            with self.assertRaisesRegex(NativeChatError, "source_generation_unverified"):
+                self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_run_missing_generation_identity_or_session_fails_closed(self):
+        runs = [self.evidence_run(sessionIdAfter=None), self.evidence_run(agentId="foreign"),
+                self.evidence_run(contextSnapshot={**RUN["contextSnapshot"],
+                                          "conversationSessionGeneration": None})]
+        for run in runs:
+            self.setup_responses([self.legacy()], [run], run)
+            with self.assertRaises(NativeChatError):
+                self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_newer_pending_run_never_reuses_older_success_session(self):
+        old = self.evidence_run()
+        new = self.evidence_run(id="retry", status="running", sessionIdAfter=None,
+                       createdAt="2026-10-10T05:02:00.000Z")
+        self.setup_responses([self.legacy()], [old, new], old, new)
+        with self.assertRaisesRegex(NativeChatError, "source_run_not_successful"):
+            self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_cross_generation_source_claims_are_ambiguous(self):
+        old = self.evidence_run()
+        new = self.evidence_run(id="retry", createdAt="2026-10-10T05:02:00.000Z",
+                       contextSnapshot={**RUN["contextSnapshot"],
+                                        "conversationSessionGeneration": 1})
+        self.setup_responses([self.legacy()], [old, new], old, new)
+        with self.assertRaisesRegex(NativeChatError, "source_generation_conflict"):
+            self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_bounded_history_does_not_guess(self):
+        self.setup_responses([self.legacy()], [self.evidence_run()] * 200)
+        with self.assertRaisesRegex(NativeChatError, "source_evidence_window_exceeded"):
+            self.api.reconcile("issue", "hello", "request")
+        self.assert_read_only()
+
+    def test_final_revalidation_detects_a_newer_retry(self):
+        source, old = self.legacy(), self.evidence_run()
+        new = self.evidence_run(id="retry", status="running",
+                                createdAt="2026-10-10T05:02:00.000Z")
+        self.setup_responses(source, [old], old, REPLY, [new, old], new, old)
+        with self.assertRaisesRegex(NativeChatError, "source_run_not_successful"):
+            self.api.status("issue", "source", 0)
+        self.assert_read_only()

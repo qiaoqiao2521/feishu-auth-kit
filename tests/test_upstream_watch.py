@@ -1,13 +1,16 @@
+import datetime as dt
 import sys
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import pytest
-from scripts import upstream_watch
-from scripts.upstream_watch import (
+from scripts import upstream_watch  # noqa: E402
+from scripts.upstream_watch import (  # noqa: E402
     CandidateCommit,
     EscalationLevel,
     TargetState,
@@ -21,8 +24,6 @@ from scripts.upstream_watch import (
 
 
 def test_get_current_cycle() -> None:
-    import datetime as dt
-
     sample_date = dt.datetime(2026, 9, 14, 12, 0, 0, tzinfo=dt.timezone.utc)
     assert get_current_cycle("weekly", sample_date) == "2026-W38"
     assert get_current_cycle("monthly", sample_date) == "2026-09"
@@ -202,7 +203,8 @@ def test_extract_state_from_issue_comment() -> None:
     text = (
         "# Some issue title\n\n"
         "Commit ledger and checklist\n\n"
-        "<!-- upstream-watch-state: {\"version\": 1, \"target\": \"openclaw-lark\", \"last_sha\": \"abc1234\", \"seen_shas\": [\"abc1234\"]} -->\n"
+        '<!-- upstream-watch-state: {"version": 1, "target": "openclaw-lark", '
+        '"last_sha": "abc1234", "seen_shas": ["abc1234"]} -->\n'
     )
     extracted = UpstreamStateStore.extract_from_text(text)
     assert extracted is not None
@@ -238,7 +240,10 @@ def test_render_digest_body_and_idempotence() -> None:
         state=state,
     )
 
-    assert "https://github.com/larksuite/openclaw-lark/commit/96535757356d52f0415f750d1fdbdb536c097922" in body1
+    assert (
+        "https://github.com/larksuite/openclaw-lark/commit/96535757356d52f0415f750d1fdbdb536c097922"
+        in body1
+    )
     assert "9653575" in body1
     assert "feishu-plugin-src" in body1
     assert "<!-- upstream-watch-state:" in body1
@@ -248,7 +253,9 @@ def test_render_digest_body_and_idempotence() -> None:
     assert extracted_state["last_sha"] == cand.sha
 
 
-def test_dry_run_no_noise_on_duplicate_inputs(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+def test_dry_run_no_noise_on_duplicate_inputs(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     corpus_file = Path("tests/upstream_issues_corpus.json")
     if not corpus_file.exists():
         pytest.skip("Corpus file not found")
@@ -333,3 +340,147 @@ def test_repeated_dry_run_zero_noise(tmp_path: Path) -> None:
     # Exactly 0 new commits are returned on repeated run!
     assert len(new_raw) == 0
 
+
+class CommitHistorySession(upstream_watch.GitHubSession):
+    def __init__(self, count: int) -> None:
+        super().__init__(token="mock")
+        self.commits = [self.make_commit(index) for index in reversed(range(count))]
+        self.calls: list[dict[str, Any]] = []
+
+    @staticmethod
+    def make_commit(index: int) -> dict[str, Any]:
+        date = dt.datetime(2026, 9, 14, tzinfo=dt.timezone.utc) + dt.timedelta(minutes=index)
+        return {
+            "sha": f"c{index}",
+            "commit": {"committer": {"date": date.strftime("%Y-%m-%dT%H:%M:%SZ")}},
+        }
+
+    def request(self, method: str, path: str, *, params=None, body=None):
+        self.calls.append(dict(params))
+        start = (params["page"] - 1) * params["per_page"]
+        return self.commits[start : start + params["per_page"]]
+
+
+def test_backlog_larger_than_limit_is_drained_without_gaps() -> None:
+    session = CommitHistorySession(12)
+    state = TargetState(last_sha="c0", seen_shas=["c0"])
+    processed: list[str] = []
+
+    for _ in range(6):
+        commits = upstream_watch.fetch_commits_with_cursor(
+            session,
+            repo="owner/upstream",
+            branch="main",
+            cursor_sha=state.last_sha,
+            seen_shas=set(state.seen_shas),
+            per_page=2,
+            total_limit=3,
+        )
+        for commit in commits:
+            processed.append(commit["sha"])
+            state.record_commit(commit["sha"], commit["commit"]["committer"]["date"])
+        if not commits:
+            break
+
+    assert processed == [f"c{index}" for index in range(1, 12)]
+    assert state.last_sha == "c11"
+    # This backlog requires more than the old five-page limit.
+    assert session.calls[5]["page"] == 6
+    assert session.calls[0]["sha"] == "main"
+    assert all(call["sha"] == "c11" for call in session.calls[1:6])
+
+
+def test_existing_cursor_ignores_bootstrap_lookback() -> None:
+    session = CommitHistorySession(5)
+    commits = upstream_watch.fetch_commits_with_cursor(
+        session,
+        repo="owner/upstream",
+        branch="main",
+        cursor_sha="c0",
+        since_date=dt.datetime(2026, 10, 1, tzinfo=dt.timezone.utc),
+        per_page=2,
+    )
+    assert [commit["sha"] for commit in commits] == ["c1", "c2", "c3", "c4"]
+    assert all("since" not in call for call in session.calls)
+
+
+def test_bootstrap_starts_with_oldest_batch_in_lookback() -> None:
+    session = CommitHistorySession(8)
+    cutoff = dt.datetime(2026, 9, 14, 0, 2, tzinfo=dt.timezone.utc)
+    commits = upstream_watch.fetch_commits_with_cursor(
+        session,
+        repo="owner/upstream",
+        branch="main",
+        since_date=cutoff,
+        per_page=3,
+        total_limit=2,
+    )
+    assert [commit["sha"] for commit in commits] == ["c2", "c3"]
+    assert all(call["since"] == "2026-09-14T00:02:00Z" for call in session.calls)
+
+
+def test_seen_sha_is_not_a_history_boundary() -> None:
+    session = CommitHistorySession(5)
+    commits = upstream_watch.fetch_commits_with_cursor(
+        session,
+        repo="owner/upstream",
+        branch="main",
+        cursor_sha="c0",
+        seen_shas={"c0", "c3"},
+        per_page=2,
+    )
+    assert [commit["sha"] for commit in commits] == ["c1", "c2", "c4"]
+
+
+def test_missing_cursor_fails_instead_of_skipping_history() -> None:
+    session = CommitHistorySession(5)
+    with pytest.raises(RuntimeError, match="Saved cursor missing was not found"):
+        upstream_watch.fetch_commits_with_cursor(
+            session,
+            repo="owner/upstream",
+            branch="main",
+            cursor_sha="missing",
+            seen_shas={"c1"},
+            per_page=2,
+            total_limit=1,
+        )
+    assert [call["page"] for call in session.calls] == [1, 2, 3]
+
+
+@pytest.mark.parametrize("cursor", ["c0", None])
+def test_incomplete_scan_fails_without_returning_a_partial_batch(cursor: str | None) -> None:
+    session = CommitHistorySession(5)
+    with pytest.raises(RuntimeError, match="Incomplete commit history"):
+        upstream_watch.fetch_commits_with_cursor(
+            session,
+            repo="owner/upstream",
+            branch="main",
+            cursor_sha=cursor,
+            max_pages=1,
+            per_page=2,
+            total_limit=1,
+        )
+    assert len(session.calls) == 1
+
+
+def test_issue_repository_defaults_to_workflow_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "fork-owner/fork-repo")
+    args = upstream_watch.parse_args([])
+    assert (args.owner, args.repo) == ("fork-owner", "fork-repo")
+
+    args = upstream_watch.parse_args(["--owner", "override", "--repo", "destination"])
+    assert (args.owner, args.repo) == ("override", "destination")
+
+    args = upstream_watch.parse_args(["--owner", "override"])
+    assert (args.owner, args.repo) == ("override", "fork-repo")
+
+
+def test_issue_repository_fallback_is_user_fork(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    args = upstream_watch.parse_args([])
+    assert (args.owner, args.repo) == ("qiaoqiao2521", "feishu-auth-kit")
+
+
+def test_invalid_inspection_limit_is_rejected() -> None:
+    with pytest.raises(SystemExit, match="2"):
+        upstream_watch.parse_args(["--per-target-limit", "0"])

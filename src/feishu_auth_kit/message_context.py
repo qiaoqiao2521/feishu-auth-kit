@@ -66,10 +66,9 @@ class FeishuMessageContext:
     def prompt_text(self, *, strip_mentions: bool = True) -> str:
         prompt = self.text.strip()
         if strip_mentions:
-            for mention in self.mentions:
-                if mention.key:
-                    prompt = prompt.replace(mention.key, " ")
-            prompt = re.sub(r"(^|\s)@_[A-Za-z0-9_:-]+", " ", prompt)
+            prompt = _strip_mentions_outside_code(prompt, self.mentions)
+        if self.message_type == "post" or "\n" in prompt:
+            return prompt.strip()
         return " ".join(prompt.split())
 
     def to_dict(self, *, include_raw: bool = False) -> dict[str, Any]:
@@ -97,7 +96,143 @@ class FeishuMessageContext:
         return payload
 
 
+def _escape_markdown_text(text: str) -> str:
+    return re.sub(r"([\\`*_{}[\]()#+\-!|>~])", r"\\\1", text)
+
+
+def _strip_mentions_outside_code(text: str, mentions: list[FeishuMention]) -> str:
+    # Mention placeholders inside a fenced example are literal code.
+    fence: str | None = None
+    lines: list[str] = []
+    for line in text.split("\n"):
+        marker = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence:
+            if (
+                marker
+                and marker[1][0] == fence[0]
+                and len(marker[1]) >= len(fence)
+                and not marker[2].strip()
+            ):
+                fence = None
+        elif marker:
+            fence = marker[1]
+        else:
+            for mention in mentions:
+                if mention.key:
+                    line = line.replace(_escape_markdown_text(mention.key), " ")
+                    line = line.replace(mention.key, " ")
+            line = re.sub(r"(^|\s)@_[A-Za-z0-9_:-]+", " ", line)
+            line = re.sub(r"(^|\s)@\\_[A-Za-z0-9\\_:-]+", " ", line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _string_value(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _post_payload(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict) and isinstance(value.get("content"), list):
+        return value
+    return None
+
+
+def _resolve_post_payload(value: dict[str, Any]) -> dict[str, Any] | None:
+    direct = _post_payload(value)
+    if direct is not None:
+        return direct
+    for candidate in (value.get("post"), value):
+        nested = _post_payload(candidate)
+        if nested is not None:
+            return nested
+        if isinstance(candidate, dict):
+            for locale in candidate.values():
+                localized = _post_payload(locale)
+                if localized is not None:
+                    return localized
+    return None
+
+
+def _render_post_element(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    text = _string_value(value.get("text"))
+    tag = _string_value(value.get("tag")).strip().lower()
+    if tag == "a":
+        href = _string_value(value.get("href")).strip()
+        label = _escape_markdown_text(text or href)
+        return f"[{label}]({href})" if href else label
+    if tag == "at":
+        mention = (
+            _string_value(value.get("user_name"))
+            or _string_value(value.get("user_id"))
+            or _string_value(value.get("open_id"))
+        )
+        return f"@{_escape_markdown_text(mention)}" if mention else ""
+    if tag in ("code_block", "pre"):
+        language = re.sub(
+            r"[^A-Za-z0-9_+#.-]",
+            "",
+            (_string_value(value.get("language")) or _string_value(value.get("lang"))).strip(),
+        )
+        code = (text or _string_value(value.get("content"))).replace("\r\n", "\n")
+        # Feishu code blocks can contain Markdown fences of their own.
+        length = max([3, *(len(run) + 1 for run in re.findall(r"`+", code))])
+        fence = "`" * length
+        trailing_newline = "" if code.endswith("\n") else "\n"
+        return f"{fence}{language}\n{code}{trailing_newline}{fence}"
+    if tag in ("md", "lark_md"):
+        return text or _string_value(value.get("content"))
+    if tag == "br":
+        return "\n"
+    if tag == "img":
+        return "![image]"
+    if tag == "media":
+        return "[media]"
+    return _escape_markdown_text(text)
+
+
+def _render_post_paragraph(row: list[Any]) -> str:
+    rendered = ""
+    after_code_block = False
+    for element in row:
+        text = _render_post_element(element)
+        if not text:
+            continue
+        tag = _string_value(element.get("tag")).strip().lower()
+        code_block = tag in ("code_block", "pre")
+        if (code_block and rendered and not rendered.endswith("\n")) or (
+            after_code_block and not text.startswith("\n")
+        ):
+            rendered += "\n"
+        rendered += text
+        after_code_block = code_block
+    return rendered
+
+
+def _parse_post_text(content: Any) -> str:
+    value = content
+    if isinstance(content, str):
+        try:
+            value = json.loads(content)
+        except json.JSONDecodeError:
+            return "[Rich text message]"
+    payload = _resolve_post_payload(_as_dict(value))
+    if payload is None:
+        return "[Rich text message]"
+    paragraphs = [
+        _render_post_paragraph(row)
+        for row in payload["content"]
+        if isinstance(row, list)
+    ]
+    title = _escape_markdown_text(_string_value(payload.get("title")).strip())
+    body = "\n".join(paragraphs).strip()
+    return "\n\n".join(part for part in (title, body) if part) or "[Rich text message]"
+
+
 def _parse_text(message_type: str, content: Any) -> str:
+    if message_type == "post":
+        return _parse_post_text(content)
     content_payload = _as_dict(content)
     if "text" in content_payload:
         return str(content_payload["text"])

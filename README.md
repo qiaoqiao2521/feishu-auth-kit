@@ -59,6 +59,20 @@ ControlMesh、Claude Code、OpenClaw，或者自定义脚本，都可以复用�
 | Orchestration | pending flow registry、scope merge、batch planning、synthetic retry |
 | Claude surface | 面向 Claude / tool caller 的轻量 JSON wrapper |
 
+### 上游兼容性更新（2026-10-15）
+
+- TypeScript 交互分发支持 `action.name`、`form_submit.form_name` 和 `formValue`，
+  可读取 SDK 直接传入或 webhook envelope 中的 `operator`。
+- Python / TypeScript 入站解析支持富文本 `post` 的标题、段落、链接、提及和代码块；
+  多行 prompt 保留换行、代码缩进和代码内部的反引号。
+- TypeScript 流式卡片在完成、取消或失败时先等待在途更新，再发送最终快照；
+  首次终态生效，所有终态调用共享投递结果。
+- Python / TypeScript 的 `FeishuApiError` 保留业务错误码、HTTP 状态和日志 ID，
+  `21001` 增加访问控制排查提示。
+
+上游提交、issues、兼容性说明与验证方法见
+[本轮同步记录](docs/upstream-sync-2026-10-15.md)。
+
 ## 它不是什么
 
 - 它不是 ControlMesh 本体。

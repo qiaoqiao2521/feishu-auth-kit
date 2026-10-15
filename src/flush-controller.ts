@@ -35,6 +35,7 @@ export class FlushController {
   /** Mark the controller as completed - no further flushes will be scheduled. */
   complete(): void {
     this.isCompleted = true;
+    this.needsReflush = false;
     this.cancelPendingFlush();
   }
 
@@ -100,7 +101,7 @@ export class FlushController {
    * @param throttleMs Minimum interval between updates. Defaults to constants.defaultThrottleMs.
    */
   async throttledUpdate(throttleMs: number = this.constants.defaultThrottleMs): Promise<void> {
-    if (!this._cardMessageReady) return;
+    if (!this._cardMessageReady || this.isCompleted) return;
 
     const now = Date.now();
     const elapsed = now - this.lastUpdateTime;

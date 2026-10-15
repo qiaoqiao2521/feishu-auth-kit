@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { FlushController } from "../src/flush-controller.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("FlushController", () => {
   it("does not flush when cardMessageReady is false", async () => {
@@ -93,5 +97,41 @@ describe("FlushController", () => {
     expect(doFlush).toHaveBeenCalledTimes(1); // No second flush after complete
 
     vi.useRealTimers();
+  });
+
+  it("does not schedule throttled updates after completion", async () => {
+    vi.useFakeTimers();
+    const doFlush = vi.fn().mockResolvedValue(undefined);
+    const controller = new FlushController(doFlush);
+    controller.setCardMessageReady(true);
+    controller.complete();
+
+    await controller.throttledUpdate(300);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(3000);
+    await controller.throttledUpdate(300);
+    expect(vi.getTimerCount()).toBe(0);
+    await controller.flush();
+    expect(doFlush).not.toHaveBeenCalled();
+  });
+
+  it("drains an in-flight request without scheduling its queued reflush after completion", async () => {
+    vi.useFakeTimers();
+    let resolveFlush!: () => void;
+    const doFlush = vi.fn(() => new Promise<void>((resolve) => { resolveFlush = resolve; }));
+    const controller = new FlushController(doFlush);
+    controller.setCardMessageReady(true);
+
+    const first = controller.flush();
+    await controller.flush();
+    controller.complete();
+    const waiting = controller.waitForFlush();
+    resolveFlush();
+    await first;
+    await waiting;
+    await vi.runAllTimersAsync();
+
+    expect(doFlush).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -27,6 +27,7 @@ export class StreamingCardController {
   private readonly flushController: FlushController;
   private readonly throttleMs: number;
   private readonly onFlushCallback?: (cardPayload: Record<string, any>) => Promise<void>;
+  private finalizationPromise: Promise<void> | null = null;
 
   constructor(options: StreamingCardOptions = {}) {
     this.title = options.title ?? "Agent Working...";
@@ -95,47 +96,62 @@ export class StreamingCardController {
   }
 
   /**
-   * Complete streaming with optional final override text, flushing immediately.
+   * Complete streaming with optional final override text and await delivery.
+   * The first terminal operation wins; later terminal calls share its result.
    */
-  async complete(finalText?: string): Promise<void> {
-    if (this.state === "completed") return;
-    this.state = "completed";
-    if (finalText !== undefined) {
-      this.mainContent = finalText;
-    }
-    this.flushController.cancelPendingFlush();
-    await this.flushController.flush();
-    this.flushController.complete();
+  complete(finalText?: string): Promise<void> {
+    return this.finalize("completed", () => {
+      if (finalText !== undefined) {
+        this.mainContent = finalText;
+      }
+    });
   }
 
   /**
    * Abort streaming.
    */
-  async abort(reason: string = "Aborted by user"): Promise<void> {
-    if (this.state === "completed" || this.state === "aborted") return;
-    this.state = "aborted";
-    this.mainContent += `\n\n*(Cancelled: ${reason})*`;
-    this.flushController.cancelPendingFlush();
-    await this.flushController.flush();
-    this.flushController.complete();
+  abort(reason: string = "Aborted by user"): Promise<void> {
+    return this.finalize("aborted", () => {
+      this.mainContent += `\n\n*(Cancelled: ${reason})*`;
+    });
   }
 
   /**
    * Mark stream as error and flush card.
    */
-  async error(err: Error | string): Promise<void> {
-    this.state = "error";
-    this.errorMessage = typeof err === "string" ? err : err.message;
-    this.flushController.cancelPendingFlush();
-    await this.flushController.flush();
+  error(err: Error | string): Promise<void> {
+    return this.finalize("error", () => {
+      this.errorMessage = typeof err === "string" ? err : err.message;
+    });
+  }
+
+  private finalize(
+    state: "completed" | "error" | "aborted",
+    update: () => void
+  ): Promise<void> {
+    if (this.finalizationPromise) return this.finalizationPromise;
+
+    this.state = state;
+    update();
+    const payload = this.buildCardPayload();
+
+    // Stop timers and reflush scheduling before draining the current request.
+    // Sending the final snapshot separately keeps it out of the flush mutex's
+    // early-return path and prevents an older request from overwriting it.
     this.flushController.complete();
+    this.finalizationPromise = this.flushController.waitForFlush().then(async () => {
+      if (this.onFlushCallback) {
+        await this.onFlushCallback(payload);
+      }
+    });
+    return this.finalizationPromise;
   }
 
   /**
-   * Wait for any current flush network request to finish.
+   * Wait for the current flush, including final delivery once terminating.
    */
   async waitForFlush(): Promise<void> {
-    await this.flushController.waitForFlush();
+    await (this.finalizationPromise ?? this.flushController.waitForFlush());
   }
 
   /**

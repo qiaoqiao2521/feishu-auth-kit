@@ -87,13 +87,9 @@ export class FeishuMessageContext {
     const stripMentions = options?.strip_mentions ?? true;
     let prompt = this.text.trim();
     if (stripMentions) {
-      for (const mention of this.mentions) {
-        if (mention.key) {
-          prompt = prompt.split(mention.key).join(" ");
-        }
-      }
-      prompt = prompt.replace(/(^|\s)@_[A-Za-z0-9_:-]+/g, " ");
+      prompt = stripMentionsOutsideCode(prompt, this.mentions);
     }
+    if (this.message_type === "post" || prompt.includes("\n")) return prompt.trim();
     return prompt.split(/\s+/).filter(Boolean).join(" ");
   }
 
@@ -130,6 +126,135 @@ export class FeishuMessageContext {
   }
 }
 
+function stripMentionsOutsideCode(text: string, mentions: FeishuMention[]): string {
+  // Mention placeholders inside a fenced example are literal code.
+  let fence: string | null = null;
+  return text.split("\n").map((line) => {
+    const marker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) {
+        fence = null;
+      }
+      return line;
+    }
+    if (marker) {
+      fence = marker[1];
+      return line;
+    }
+    for (const mention of mentions) {
+      if (mention.key) {
+        line = line.split(escapeMarkdownText(mention.key)).join(" ");
+        line = line.split(mention.key).join(" ");
+      }
+    }
+    return line.replace(/(^|\s)@_[A-Za-z0-9_:-]+/g, " ")
+      .replace(/(^|\s)@\\_[A-Za-z0-9\\_:-]+/g, " ");
+  }).join("\n");
+}
+
+function escapeMarkdownText(text: string): string {
+  return text.replace(/([\\`*_{}[\]()#+\-!|>~])/g, "\\$1");
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function postPayload(value: unknown): Record<string, any> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, any>;
+  if (Array.isArray(record.content)) return record;
+  return null;
+}
+
+function resolvePostPayload(value: Record<string, any>): Record<string, any> | null {
+  const direct = postPayload(value);
+  if (direct) return direct;
+  for (const candidate of [value.post, value]) {
+    const nested = postPayload(candidate);
+    if (nested) return nested;
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      for (const locale of Object.values(candidate)) {
+        const localized = postPayload(locale);
+        if (localized) return localized;
+      }
+    }
+  }
+  return null;
+}
+
+function renderPostElement(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const element = value as Record<string, unknown>;
+  const text = stringValue(element.text);
+  switch (stringValue(element.tag).trim().toLowerCase()) {
+    case "a": {
+      const href = stringValue(element.href).trim();
+      const label = escapeMarkdownText(text || href);
+      return href ? `[${label}](${href})` : label;
+    }
+    case "at": {
+      const mention = stringValue(element.user_name) || stringValue(element.user_id) || stringValue(element.open_id);
+      return mention ? `@${escapeMarkdownText(mention)}` : "";
+    }
+    case "code_block":
+    case "pre": {
+      const language = (stringValue(element.language) || stringValue(element.lang))
+        .trim().replace(/[^A-Za-z0-9_+#.-]/g, "");
+      const code = (text || stringValue(element.content)).replace(/\r\n/g, "\n");
+      // Feishu code blocks can contain Markdown fences of their own.
+      let length = 3;
+      for (const run of code.matchAll(/`+/g)) length = Math.max(length, run[0].length + 1);
+      const fence = "`".repeat(length);
+      return `${fence}${language}\n${code}${code.endsWith("\n") ? "" : "\n"}${fence}`;
+    }
+    case "md":
+    case "lark_md":
+      return text || stringValue(element.content);
+    case "br":
+      return "\n";
+    case "img":
+      return "![image]";
+    case "media":
+      return "[media]";
+    default:
+      return escapeMarkdownText(text);
+  }
+}
+
+function renderPostParagraph(row: unknown[]): string {
+  let rendered = "";
+  let afterCodeBlock = false;
+  for (const element of row) {
+    const text = renderPostElement(element);
+    if (!text) continue;
+    const tag = element && typeof element === "object" && !Array.isArray(element)
+      ? stringValue((element as Record<string, unknown>).tag).trim().toLowerCase()
+      : "";
+    const codeBlock = tag === "code_block" || tag === "pre";
+    if ((codeBlock && rendered && !rendered.endsWith("\n")) || (afterCodeBlock && !text.startsWith("\n"))) {
+      rendered += "\n";
+    }
+    rendered += text;
+    afterCodeBlock = codeBlock;
+  }
+  return rendered;
+}
+
+function parsePostText(content: any): string {
+  let value: unknown = content;
+  if (typeof content === "string") {
+    try { value = JSON.parse(content); } catch { return "[Rich text message]"; }
+  }
+  const payload = resolvePostPayload(asDict(value));
+  if (!payload) return "[Rich text message]";
+  const paragraphs = payload.content.filter(Array.isArray)
+    .map(renderPostParagraph);
+  const title = escapeMarkdownText(stringValue(payload.title).trim());
+  const body = paragraphs.join("\n").trim();
+  return [title, body].filter(Boolean).join("\n\n") || "[Rich text message]";
+}
+
 function asDict(value: any): Record<string, any> {
   if (typeof value === "object" && value !== null) {
     return value;
@@ -155,6 +280,7 @@ function firstString(...values: any[]): string | null {
 }
 
 function parseText(messageType: string, content: any): string {
+  if (messageType === "post") return parsePostText(content);
   const payload = asDict(content);
   if ("text" in payload) {
     return String(payload.text);

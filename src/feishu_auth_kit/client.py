@@ -15,7 +15,25 @@ class FeishuAuthKitError(RuntimeError):
 
 
 class FeishuApiError(FeishuAuthKitError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | str | None = None,
+        http_status: int | None = None,
+        log_id: str | None = None,
+    ) -> None:
+        self.code = code
+        self.http_status = http_status
+        self.log_id = log_id
+        self.api_message = message
+        self.hint = (
+            "飞书访问控制策略拒绝了请求，请检查应用安全设置中的出口 IP 白名单，"
+            "并联系企业管理员检查 API 访问策略。"
+            if str(code) == "21001"
+            else None
+        )
+        super().__init__(f"{message} {self.hint}" if self.hint else message)
 
 
 def build_permission_url(
@@ -54,12 +72,59 @@ class FeishuAuthClient:
 
     def _request_json(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         response = self.session.request(method, url, timeout=self.timeout, **kwargs)
-        if hasattr(response, "raise_for_status"):
-            response.raise_for_status()
-        payload = response.json()
-        if isinstance(payload, dict) and payload.get("code", 0) not in (0, None):
-            message = payload.get("msg") or payload.get("message") or "Unknown Feishu API error"
-            raise FeishuApiError(str(message))
+        status = getattr(response, "status_code", None)
+        http_error = isinstance(status, int) and not 200 <= status < 300
+        try:
+            payload = response.json()
+        except ValueError:
+            if not http_error:
+                raise
+            payload = None
+        code = payload.get("code") if isinstance(payload, dict) else None
+        if http_error or code not in (0, None):
+            raw_message = (
+                payload.get("msg") or payload.get("message") if isinstance(payload, dict) else None
+            )
+            message = (
+                raw_message
+                if isinstance(raw_message, str)
+                else (f"HTTP error {status}" if http_error else "Unknown Feishu API error")
+            )
+            # An API or proxy may echo credentials in its error message.
+            credentials = [self.app_secret]
+            for key, value in (kwargs.get("headers") or {}).items():
+                if key.lower() == "authorization":
+                    credentials.append(value[7:] if value.lower().startswith("bearer ") else value)
+            for credential in credentials:
+                if credential:
+                    message = message.replace(credential, "[REDACTED]")
+            header_log_id = next(
+                (
+                    value
+                    for key, value in (getattr(response, "headers", None) or {}).items()
+                    if key.lower() == "x-tt-logid"
+                ),
+                None,
+            )
+            error = payload.get("error") if isinstance(payload, dict) else None
+            log_id = next(
+                (
+                    value.strip()
+                    for value in (
+                        header_log_id,
+                        payload.get("log_id") if isinstance(payload, dict) else None,
+                        error.get("log_id") if isinstance(error, dict) else None,
+                    )
+                    if isinstance(value, str) and value.strip()
+                ),
+                None,
+            )
+            raise FeishuApiError(
+                message,
+                code=code if isinstance(code, (int, str)) else None,
+                http_status=status,
+                log_id=log_id,
+            )
         return payload
 
     def get_tenant_access_token(self, *, force_refresh: bool = False) -> TenantAccessToken:
@@ -152,4 +217,3 @@ class FeishuAuthClient:
             token_type=token_type,
             op_from=op_from,
         )
-

@@ -13,7 +13,21 @@ export interface CardActionContext {
   chatId?: string;
   tag: string;
   actionValue: Record<string, any>;
+  /** Effective route: value.action, value.action_id, name, then form_submit form_name. */
+  actionName?: string;
+  /** Submitted field values, including checkbox arrays and text inputs. */
+  formValue?: Record<string, any>;
   rawEvent: Record<string, any>;
+}
+
+function asRecord(value: unknown): Record<string, any> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, any>
+    : undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && !!value.trim());
 }
 
 export interface CardActionToast {
@@ -48,13 +62,11 @@ export class InteractiveActionDispatcher {
   };
 
   /**
-   * Register a handler for a specific action string in actionValue (e.g. actionValue.action === 'retry')
+   * Register a handler for a button action or form name.
    */
   onAction(actionName: string, handler: CardActionHandler): this {
     return this.register(
-      (ctx) =>
-        ctx.actionValue?.action === actionName ||
-        ctx.actionValue?.action_id === actionName,
+      (ctx) => (ctx.actionName ?? firstString(ctx.actionValue?.action, ctx.actionValue?.action_id)) === actionName,
       handler
     );
   }
@@ -86,40 +98,35 @@ export class InteractiveActionDispatcher {
    * Parse raw incoming Feishu webhook/websocket event payload into CardActionContext.
    */
   static parseContext(event: Record<string, any>): CardActionContext {
-    const action = event.action || event.event?.action || {};
-    const context = event.context || event.event?.context || {};
-    const openMessageId =
-      context.open_message_id ||
-      event.open_message_id ||
-      event.event?.open_message_id ||
-      "";
-    const openId =
-      context.open_id ||
-      event.open_id ||
-      event.event?.operator?.open_id ||
-      event.event?.sender?.sender_id?.open_id ||
-      "";
-    const userId =
-      context.user_id ||
-      event.user_id ||
-      event.event?.operator?.user_id ||
-      "";
-    const chatId =
-      context.open_chat_id ||
-      event.open_chat_id ||
-      event.event?.open_chat_id ||
-      "";
-
-    const tag = action.tag || "button";
-    const actionValue = action.value || {};
+    // The SDK passes the event body directly; webhook ingress often passes its envelope.
+    const body = asRecord(event.event) ?? event;
+    const action = asRecord(body.action) ?? {};
+    const context = asRecord(body.context) ?? {};
+    const operator = asRecord(body.operator) ?? {};
+    const senderId = asRecord(asRecord(body.sender)?.sender_id) ?? {};
+    const openMessageId = firstString(context.open_message_id, body.open_message_id) ?? "";
+    const openId = firstString(operator.open_id, body.open_id, context.open_id, senderId.open_id) ?? "";
+    // user_id and open_id are different namespaces; preserve each without aliasing them.
+    const userId = firstString(operator.user_id, body.user_id, context.user_id);
+    const chatId = firstString(context.open_chat_id, body.open_chat_id);
+    const tag = firstString(action.tag) ?? "button";
+    const actionValue = asRecord(action.value) ?? {};
+    const actionName = firstString(
+      actionValue.action,
+      actionValue.action_id,
+      action.name,
+      tag === "form_submit" ? action.form_name : undefined,
+    );
 
     return {
       openId,
-      userId: userId || undefined,
+      userId,
       messageId: openMessageId,
-      chatId: chatId || undefined,
+      chatId,
       tag,
       actionValue,
+      actionName,
+      formValue: asRecord(action.form_value) ?? {},
       rawEvent: event,
     };
   }

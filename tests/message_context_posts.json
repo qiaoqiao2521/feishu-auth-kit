@@ -1,0 +1,232 @@
+[
+  {
+    "name": "direct structured post with links and mentions",
+    "content": {
+      "title": "简报",
+      "content": [
+        [
+          {
+            "tag": "text",
+            "text": "查看 "
+          },
+          {
+            "tag": "a",
+            "text": "Docs",
+            "href": "https://example.com"
+          }
+        ],
+        [
+          {
+            "tag": "at",
+            "user_name": "Alice",
+            "user_id": "ou_alice"
+          }
+        ]
+      ]
+    },
+    "expected_text": "简报\n\n查看 [Docs](https://example.com)\n@Alice"
+  },
+  {
+    "name": "JSON locale post with code containing nested fences and CRLF",
+    "content": "{\"zh_cn\": {\"title\": \"示例\", \"content\": [[{\"tag\": \"code_block\", \"language\": \" markdown\\n\", \"text\": \"Before\\r\\n```markdown\\r\\n# literal heading\\r\\n```\\r\\n    After\"}]]}}",
+    "expected_text": "示例\n\n````markdown\nBefore\n```markdown\n# literal heading\n```\n    After\n````"
+  },
+  {
+    "name": "wrapped English post using alternate code fields",
+    "content": {
+      "post": {
+        "en_us": {
+          "title": "Python",
+          "content": [
+            [
+              {
+                "tag": "code_block",
+                "lang": "python",
+                "content": "if ready:\n    run()\n"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    "expected_text": "Python\n\n```python\nif ready:\n    run()\n```"
+  },
+  {
+    "name": "mention removal preserves fenced code and indentation",
+    "content": {
+      "en_us": {
+        "content": [
+          [
+            {
+              "tag": "text",
+              "text": "@_user_1 请保留代码"
+            }
+          ],
+          [
+            {
+              "tag": "code_block",
+              "language": "text",
+              "text": "  @_user_1\n```\n    keep me"
+            }
+          ],
+          [
+            {
+              "tag": "text",
+              "text": "结束"
+            }
+          ]
+        ]
+      }
+    },
+    "mentions": [
+      {
+        "key": "@_user_1",
+        "id": {
+          "open_id": "ou_bot"
+        }
+      }
+    ],
+    "expected_text": "@\\_user\\_1 请保留代码\n````text\n  @_user_1\n```\n    keep me\n````\n结束",
+    "expected_prompt": "请保留代码\n````text\n  @_user_1\n```\n    keep me\n````\n结束"
+  },
+  {
+    "name": "selects a valid locale after an invalid locale",
+    "content": {
+      "zh_cn": {
+        "content": "invalid"
+      },
+      "en_us": {
+        "title": "Fallback locale",
+        "content": [
+          [
+            {
+              "tag": "text",
+              "text": "Hello"
+            }
+          ]
+        ]
+      }
+    },
+    "expected_text": "Fallback locale\n\nHello"
+  },
+  {
+    "name": "media placeholders avoid exposing raw resource JSON",
+    "content": {
+      "content": [
+        [
+          {
+            "tag": "img",
+            "image_key": "private_image_key"
+          },
+          {
+            "tag": "media",
+            "file_key": "private_file_key"
+          }
+        ]
+      ]
+    },
+    "expected_text": "![image][media]"
+  },
+  {
+    "name": "malformed JSON post",
+    "content": "{\"title\":\"broken\"",
+    "expected_text": "[Rich text message]"
+  },
+  {
+    "name": "malformed post shape",
+    "content": {
+      "title": "hidden",
+      "content": {
+        "private": "payload"
+      }
+    },
+    "expected_text": "[Rich text message]"
+  },
+  {
+    "name": "malformed post rows",
+    "content": {
+      "content": [
+        null,
+        "invalid",
+        [
+          {
+            "tag": "image",
+            "image_key": "private"
+          }
+        ]
+      ]
+    },
+    "expected_text": "[Rich text message]"
+  },
+  {
+    "name": "null post",
+    "content": null,
+    "expected_text": "[Rich text message]"
+  },
+  {
+    "name": "preserves br before the next paragraph",
+    "content": {
+      "content": [
+        [
+          {
+            "tag": "text",
+            "text": "A"
+          },
+          {
+            "tag": "br"
+          }
+        ],
+        [
+          {
+            "tag": "text",
+            "text": "B"
+          }
+        ]
+      ]
+    },
+    "expected_text": "A\n\nB"
+  },
+  {
+    "name": "preserves text newline before the next paragraph",
+    "content": {
+      "content": [
+        [
+          {
+            "tag": "text",
+            "text": "A\n"
+          }
+        ],
+        [
+          {
+            "tag": "text",
+            "text": "B"
+          }
+        ]
+      ]
+    },
+    "expected_text": "A\n\nB"
+  },
+  {
+    "name": "separates code from adjacent text in the same paragraph",
+    "content": {
+      "content": [
+        [
+          {
+            "tag": "text",
+            "text": "Before"
+          },
+          {
+            "tag": "code_block",
+            "language": "python",
+            "text": "  run()"
+          },
+          {
+            "tag": "text",
+            "text": "After"
+          }
+        ]
+      ]
+    },
+    "expected_text": "Before\n```python\n  run()\n```\nAfter"
+  }
+]

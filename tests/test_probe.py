@@ -45,6 +45,10 @@ def test_register_ai_agent_pings_official_openclaw_bot_endpoint() -> None:
     assert result.app_id == "cli_xxx"
     assert result.bot_open_id == "ou_bot"
     assert result.bot_name == "Test Bot"
+    assert result.raw == {
+        "code": 0, "data": {"pingBotInfo": {"botID": "ou_bot", "botName": "Test Bot"}},
+    }
+    assert result.api_error is None
     assert session.calls[1]["method"] == "POST"
     assert session.calls[1]["url"] == (
         "https://open.feishu.cn/open-apis/bot/v1/openclaw_bot/ping"

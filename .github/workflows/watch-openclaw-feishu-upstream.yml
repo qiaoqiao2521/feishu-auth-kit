@@ -64,4 +64,6 @@ jobs:
           fi
           CYCLE="${{ inputs.cycle || 'weekly' }}"
           LOOKBACK="${{ inputs.lookback_days || '14' }}"
-          python scripts/upstream_watch.py --cycle "$CYCLE" --lookback-days "$LOOKBACK" $DRY_RUN_ARG
+          python scripts/upstream_watch.py \
+            --owner "${GITHUB_REPOSITORY%/*}" --repo "${GITHUB_REPOSITORY#*/}" \
+            --cycle "$CYCLE" --lookback-days "$LOOKBACK" $DRY_RUN_ARG

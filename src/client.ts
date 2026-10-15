@@ -9,9 +9,30 @@ export class FeishuAuthKitError extends Error {
 }
 
 export class FeishuApiError extends FeishuAuthKitError {
-  constructor(message: string) {
-    super(message);
+  readonly code: number | string | null;
+  readonly httpStatus: number | null;
+  readonly logId: string | null;
+  readonly apiMessage: string;
+  readonly hint: string | null;
+
+  constructor(
+    message: string,
+    details: {
+      code?: number | string | null;
+      httpStatus?: number | null;
+      logId?: string | null;
+    } = {},
+  ) {
+    const hint = String(details.code) === "21001"
+      ? "飞书访问控制策略拒绝了请求，请检查应用安全设置中的出口 IP 白名单，并联系企业管理员检查 API 访问策略。"
+      : null;
+    super(hint ? `${message} ${hint}` : message);
     this.name = "FeishuApiError";
+    this.code = details.code ?? null;
+    this.httpStatus = details.httpStatus ?? null;
+    this.logId = details.logId ?? null;
+    this.apiMessage = message;
+    this.hint = hint;
   }
 }
 
@@ -132,15 +153,41 @@ export class FeishuAuthClient {
     }
 
     const response = await this.fetchFn(finalUrl, init);
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      throw new FeishuApiError(`HTTP error ${response.status}: ${errText}`);
+    let payload: any;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (response.ok) throw error;
     }
 
-    const payload = await response.json();
-    if (payload && typeof payload === "object" && payload.code !== 0 && payload.code !== undefined && payload.code !== null) {
-      const message = payload.msg || payload.message || "Unknown Feishu API error";
-      throw new FeishuApiError(String(message));
+    const code = payload && typeof payload === "object" ? payload.code : null;
+    const businessError = code !== 0 && code !== undefined && code !== null;
+    if (!response.ok || businessError) {
+      const rawMessage = payload?.msg || payload?.message;
+      let message = typeof rawMessage === "string"
+        ? rawMessage
+        : response.ok ? "Unknown Feishu API error" : `HTTP error ${response.status}`;
+      // An API or proxy may echo credentials in its error message.
+      const credentials = [this.appSecret];
+      for (const [key, value] of Object.entries(options.headers || {})) {
+        if (key.toLowerCase() === "authorization") {
+          credentials.push(value.replace(/^Bearer\s+/i, ""));
+        }
+      }
+      for (const credential of credentials) {
+        if (credential) message = message.split(credential).join("[REDACTED]");
+      }
+      const logIdCandidates = [
+        response.headers?.get?.("x-tt-logid"),
+        payload?.log_id,
+        payload?.error?.log_id,
+      ];
+      const logId = logIdCandidates.find((value) => typeof value === "string" && value.trim());
+      throw new FeishuApiError(message, {
+        code: typeof code === "number" || typeof code === "string" ? code : null,
+        httpStatus: Number.isInteger(response.status) ? response.status : null,
+        logId: logId ? logId.trim() : null,
+      });
     }
     return payload;
   }

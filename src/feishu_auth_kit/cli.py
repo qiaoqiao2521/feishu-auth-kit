@@ -33,7 +33,7 @@ from .orchestration import (
     verify_access_token_identity,
 )
 from .owner_policy import OwnerPolicyMode, check_owner_policy
-from .probe import register_ai_agent
+from .probe import api_error_details, register_ai_agent
 from .runtime_cards import (
     CardAction,
     ContinuationState,
@@ -310,6 +310,8 @@ def cmd_register_probe(args: argparse.Namespace) -> int:
         "bot_open_id": result.bot_open_id,
         "error": result.error,
     }
+    if not result.ok and result.api_error:
+        payload["api_error"] = result.api_error
     if args.json:
         _json_dump(payload)
     else:
@@ -321,6 +323,8 @@ def cmd_register_probe(args: argparse.Namespace) -> int:
             print(f"Bot open_id: {result.bot_open_id}")
         if result.error:
             print(f"Error: {result.error}")
+        if not result.ok and result.api_error:
+            print(f"API error: {json.dumps(result.api_error, ensure_ascii=False)}")
     return 0 if result.ok else 1
 
 
@@ -336,12 +340,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"Tenant token TTL: {tenant_token.expire or 'unknown'}")
     except FeishuApiError as exc:
         print(f"Tenant token: FAILED ({exc})")
+        details = api_error_details(exc)
+        if details:
+            print(f"API error: {json.dumps(details, ensure_ascii=False)}")
         return 1
 
     try:
         app_info = client.get_app_info(args.target_app_id)
     except FeishuApiError as exc:
         print(f"App info: FAILED ({exc})")
+        details = api_error_details(exc)
+        if details:
+            print(f"API error: {json.dumps(details, ensure_ascii=False)}")
         permission_url = client.build_permission_url(
             client.app_id,
             scopes=["application:application:self_manage"],

@@ -29,7 +29,7 @@ import {
   verifyAccessTokenIdentity,
 } from './orchestration.js';
 import { OwnerPolicyMode, checkOwnerPolicy } from './owner-policy.js';
-import { registerAiAgent } from './probe.js';
+import { apiErrorDetails, registerAiAgent } from './probe.js';
 import {
   CardAction,
   ContinuationState,
@@ -325,6 +325,7 @@ async function cmdRegisterProbe(opts: Record<string, any>): Promise<number> {
     bot_name: result.bot_name,
     bot_open_id: result.bot_open_id,
     error: result.error,
+    ...(!result.ok && result.api_error ? { api_error: result.api_error } : {}),
   };
   if (opts.json) {
     jsonDump(payload);
@@ -334,6 +335,7 @@ async function cmdRegisterProbe(opts: Record<string, any>): Promise<number> {
     if (result.bot_name) console.log(`Bot name: ${result.bot_name}`);
     if (result.bot_open_id) console.log(`Bot open_id: ${result.bot_open_id}`);
     if (result.error) console.log(`Error: ${result.error}`);
+    if (!result.ok && result.api_error) console.log(`API error: ${JSON.stringify(result.api_error)}`);
   }
   return result.ok ? 0 : 1;
 }
@@ -351,6 +353,8 @@ async function cmdDoctor(opts: Record<string, any>): Promise<number> {
     console.log(`Tenant token TTL: ${tenantToken.expire || 'unknown'}`);
   } catch (err) {
     console.log(`Tenant token: FAILED (${err})`);
+    const details = apiErrorDetails(err);
+    if (details) console.log(`API error: ${JSON.stringify(details)}`);
     return 1;
   }
 
@@ -359,6 +363,8 @@ async function cmdDoctor(opts: Record<string, any>): Promise<number> {
     appInfo = await client.getAppInfo(opts['target-app-id'] || 'me');
   } catch (err) {
     console.log(`App info: FAILED (${err})`);
+    const details = apiErrorDetails(err);
+    if (details) console.log(`API error: ${JSON.stringify(details)}`);
     const permissionUrl = client.buildPermissionUrl(client.appId, {
       scopes: ['application:application:self_manage'],
     });

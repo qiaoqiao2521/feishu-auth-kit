@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { parseFeishuMessageContext } from '../src/message-context.js';
+
+const postCases = JSON.parse(readFileSync(new URL('./message_context_posts.json', import.meta.url), 'utf8'));
 
 describe('message-context', () => {
   it('extracts native fields', () => {
@@ -45,5 +48,31 @@ describe('message-context', () => {
     expect(context.text).toBe('@_user_1 帮我总结今天待办');
     expect(context.promptText()).toBe('帮我总结今天待办');
     expect(context.mentions[0].open_id).toBe('ou_bot');
+  });
+
+  for (const sample of postCases) {
+    it(sample.name, () => {
+      const context = parseFeishuMessageContext({
+        message: { message_type: 'post', content: sample.content, mentions: sample.mentions ?? [] },
+      });
+      expect(context.text).toBe(sample.expected_text);
+      expect(context.promptText()).toBe(sample.expected_prompt ?? sample.expected_text);
+      expect(context.promptText({ strip_mentions: false })).toBe(sample.expected_text);
+      expect(context.toDict().prompt_text).toBe(sample.expected_prompt ?? sample.expected_text);
+    });
+  }
+
+  it('preserves multiline text and code while stripping mentions outside fences', () => {
+    const text = '@_user_1 Review:\n```text\n    @_user_1\n```\n  keep indentation';
+    const context = parseFeishuMessageContext({
+      message: { message_type: 'text', content: { text }, mentions: [{ key: '@_user_1' }] },
+    });
+    expect(context.promptText()).toBe('Review:\n```text\n    @_user_1\n```\n  keep indentation');
+    expect(context.promptText({ strip_mentions: false })).toBe(text);
+  });
+
+  it('keeps existing single-line whitespace normalization', () => {
+    const context = parseFeishuMessageContext({ content: { text: '  @_user_1   hello\tworld  ' } });
+    expect(context.promptText()).toBe('hello world');
   });
 });

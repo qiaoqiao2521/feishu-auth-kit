@@ -37,6 +37,10 @@ describe('probe', () => {
     expect(result.app_id).toBe('cli_xxx');
     expect(result.bot_open_id).toBe('ou_bot');
     expect(result.bot_name).toBe('Test Bot');
+    expect(result.raw).toEqual({
+      code: 0, data: { pingBotInfo: { botID: 'ou_bot', botName: 'Test Bot' } },
+    });
+    expect(result).not.toHaveProperty('api_error');
 
     const [url, init] = fetchMock.mock.calls[1];
     expect(init.method).toBe('POST');

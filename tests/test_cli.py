@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import requests
+
 from feishu_auth_kit import cli
 from feishu_auth_kit.app_registration import (
     AppRegistrationBeginResult,
@@ -10,6 +12,74 @@ from feishu_auth_kit.app_registration import (
 )
 from feishu_auth_kit.orchestration import AuthContinuation
 from feishu_auth_kit.runtime_cards import FileContinuationStore
+
+
+def _api_response(payload: dict, *, log_id: str | None = None) -> requests.Response:
+    response = requests.Response()
+    response.status_code = 200
+    response._content = json.dumps(payload).encode()
+    if log_id:
+        response.headers["x-tt-logid"] = log_id
+    return response
+
+
+def test_register_probe_json_exposes_http_200_policy_denial_from_ping(monkeypatch, capsys) -> None:
+    responses = iter([
+        _api_response({"code": 0, "tenant_access_token": "tenant-private-token", "expire": 7200}),
+        _api_response(
+            {"code": 21001, "msg": "Access denied by access control policy."}, log_id="ping-log",
+        ),
+    ])
+    calls = []
+
+    def request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return next(responses)
+
+    monkeypatch.setattr(requests.Session, "request", request)
+    exit_code = cli.main([
+        "register", "probe", "--app-id", "cli_test", "--app-secret", "app-private-secret", "--json",
+    ])
+    stdout = capsys.readouterr().out
+    payload = json.loads(stdout)
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert "Access denied by access control policy." in payload["error"]
+    assert payload["api_error"]["code"] == 21001
+    assert payload["api_error"]["http_status"] == 200
+    assert payload["api_error"]["log_id"] == "ping-log"
+    assert "IP 白名单" in payload["api_error"]["hint"]
+    assert "tenant-private-token" not in stdout
+    assert "app-private-secret" not in stdout
+    assert len(calls) == 2
+
+
+def test_doctor_prints_http_200_tenant_token_denial_diagnostics(monkeypatch, capsys) -> None:
+    calls = []
+
+    def request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _api_response(
+            {"code": 21001, "msg": "Access denied by access control policy."}, log_id="doctor-log",
+        )
+
+    monkeypatch.setattr(requests.Session, "request", request)
+    exit_code = cli.main([
+        "doctor", "--app-id", "cli_test", "--app-secret", "app-private-secret",
+    ])
+    stdout = capsys.readouterr().out
+    diagnostic_line = next(line for line in stdout.splitlines() if line.startswith("API error: "))
+    diagnostics = json.loads(diagnostic_line.removeprefix("API error: "))
+
+    assert exit_code == 1
+    assert "Tenant token: FAILED" in stdout
+    assert diagnostics["code"] == 21001
+    assert diagnostics["http_status"] == 200
+    assert diagnostics["log_id"] == "doctor-log"
+    assert "企业管理员" in diagnostics["hint"]
+    assert "app-private-secret" not in stdout
+    assert len(calls) == 1
 
 
 def test_setup_output_contains_manual_open_platform_steps(capsys) -> None:

@@ -20,6 +20,60 @@ async function runCli(argv: string[]): Promise<{ code: number; stdout: string }>
 }
 
 describe('cli', () => {
+  it('register probe JSON exposes an HTTP 200 access-policy denial from ping', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 0, tenant_access_token: 'tenant-private-token', expire: 7200,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 21001, msg: 'Access denied by access control policy.',
+      }), { status: 200, headers: { 'x-tt-logid': 'ping-log' } }));
+    vi.stubGlobal('fetch', fetchFn);
+    try {
+      const { code, stdout } = await runCli([
+        'register', 'probe', '--app-id', 'cli_test', '--app-secret', 'app-private-secret', '--json',
+      ]);
+      const payload = JSON.parse(stdout);
+
+      expect(code).toBe(1);
+      expect(payload.ok).toBe(false);
+      expect(payload.error).toContain('Access denied by access control policy.');
+      expect(payload.api_error).toMatchObject({
+        code: 21001, http_status: 200, log_id: 'ping-log',
+        hint: expect.stringContaining('IP 白名单'),
+      });
+      expect(stdout).not.toContain('tenant-private-token');
+      expect(stdout).not.toContain('app-private-secret');
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('doctor prints diagnostic fields for an HTTP 200 tenant-token denial', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      code: 21001, msg: 'Access denied by access control policy.',
+    }), { status: 200, headers: { 'x-tt-logid': 'doctor-log' } }));
+    vi.stubGlobal('fetch', fetchFn);
+    try {
+      const { code, stdout } = await runCli([
+        'doctor', '--app-id', 'cli_test', '--app-secret', 'app-private-secret',
+      ]);
+      const diagnostics = JSON.parse(stdout.split('\n').find((line) => line.startsWith('API error: '))!.slice(11));
+
+      expect(code).toBe(1);
+      expect(stdout).toContain('Tenant token: FAILED');
+      expect(diagnostics).toMatchObject({
+        code: 21001, http_status: 200, log_id: 'doctor-log',
+        hint: expect.stringContaining('企业管理员'),
+      });
+      expect(stdout).not.toContain('app-private-secret');
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('setup output contains manual open platform steps', async () => {
     const { code, stdout } = await runCli(['setup']);
 

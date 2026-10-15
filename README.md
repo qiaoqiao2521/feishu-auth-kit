@@ -531,3 +531,15 @@ normalization, runner seams, single-card snapshots, and the native card action
 
 `ControlMesh` should include it as a bundled Feishu native runtime component,
 while other hosts may also consume the same module standalone.
+
+
+## Slack 连续对话入口（Python）
+
+新增可选的 `feishu-slack-bridge`：已配对的本人 Slack 私聊 → 持久接收账本 →
+Paperclip 原生 Agent Chat。同一私聊持续使用同一个 conversation issue，只有显式
+`/new` 才切换 generation；执行任务完成不会重置协调会话。原飞书入口保持不变。
+未知执行/送达状态只读核对，不盲目重发；只转发绑定来源的成功 run 明确选择的最终评论。
+
+配置、安全边界、运行与故障恢复见 [Slack continuity guide](docs/slack-continuity.md)。
+这是独立 Python CLI，不包含 TypeScript Slack API。部署需要已有授权的 Slack app/
+凭据和本机 `local_trusted` Paperclip；仓库测试不会触发真实消息或模型调用。

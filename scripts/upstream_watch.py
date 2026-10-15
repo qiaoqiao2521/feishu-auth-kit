@@ -29,7 +29,7 @@ from typing import Any
 
 
 API_ROOT = "https://api.github.com"
-DEFAULT_OWNER = "muqiao215"
+DEFAULT_OWNER = "qiaoqiao2521"
 DEFAULT_REPO = "feishu-auth-kit"
 LABEL_NAME = "upstream-watch"
 LABEL_COLOR = "0E8A16"
@@ -204,8 +204,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Watch OpenClaw Feishu upstreams and maintain rolling/cycle sync digests.",
     )
-    parser.add_argument("--owner", default=DEFAULT_OWNER, help="Issue target owner.")
-    parser.add_argument("--repo", default=DEFAULT_REPO, help="Issue target repository.")
+    parser.add_argument("--owner", help="Issue target owner (default: current workflow owner).")
+    parser.add_argument("--repo", help="Issue target repository (default: current workflow repo).")
     parser.add_argument(
         "--lookback-days",
         type=int,
@@ -242,7 +242,17 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         "--offline-corpus",
         help="Path to offline JSON issues corpus for offline evaluation / testing.",
     )
-    return parser.parse_args(args)
+    parsed = parser.parse_args(args)
+    if parsed.owner is None or parsed.repo is None:
+        repository = os.environ.get("GITHUB_REPOSITORY") or f"{DEFAULT_OWNER}/{DEFAULT_REPO}"
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+", repository):
+            parser.error("GITHUB_REPOSITORY must be an owner/repository pair")
+        owner, repo = repository.split("/")
+        if parsed.owner is None:
+            parsed.owner = owner
+        if parsed.repo is None:
+            parsed.repo = repo
+    return parsed
 
 
 class GitHubSession:

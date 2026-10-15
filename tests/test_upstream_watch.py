@@ -20,6 +20,38 @@ from scripts.upstream_watch import (
 )
 
 
+def test_issue_target_defaults_to_migrated_repository(monkeypatch) -> None:
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    args = upstream_watch.parse_args([])
+    assert (args.owner, args.repo) == ("qiaoqiao2521", "feishu-auth-kit")
+
+
+def test_issue_target_follows_workflow_repository(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "another-owner/renamed-kit")
+    args = upstream_watch.parse_args([])
+    assert (args.owner, args.repo) == ("another-owner", "renamed-kit")
+
+
+def test_explicit_issue_target_overrides_workflow_repository(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "another-owner/renamed-kit")
+    args = upstream_watch.parse_args(["--owner", "explicit-owner", "--repo", "explicit-kit"])
+    assert (args.owner, args.repo) == ("explicit-owner", "explicit-kit")
+
+
+def test_partial_issue_target_override_uses_workflow_default(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "another-owner/renamed-kit")
+    args = upstream_watch.parse_args(["--repo", "explicit-kit"])
+    assert (args.owner, args.repo) == ("another-owner", "explicit-kit")
+
+
+@pytest.mark.parametrize("repository", ["missing-repo", "owner/", "owner/repo/extra"])
+def test_invalid_workflow_repository_cannot_choose_issue_target(monkeypatch, repository) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", repository)
+    with pytest.raises(SystemExit) as exc:
+        upstream_watch.parse_args([])
+    assert exc.value.code == 2
+
+
 def test_get_current_cycle() -> None:
     import datetime as dt
 

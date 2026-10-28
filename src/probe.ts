@@ -1,6 +1,23 @@
-import { FeishuAuthClient } from "./client.js";
+import { FeishuApiError, FeishuAuthClient } from "./client.js";
 
 export const AI_AGENT_PING_PATH = "/open-apis/bot/v1/openclaw_bot/ping";
+
+export interface FeishuApiErrorDetails {
+  code?: number | string;
+  http_status?: number;
+  log_id?: string;
+  hint?: string;
+}
+
+export function apiErrorDetails(error: unknown): FeishuApiErrorDetails | undefined {
+  if (!(error instanceof FeishuApiError)) return undefined;
+  const details: FeishuApiErrorDetails = {};
+  if (error.code !== null) details.code = error.code;
+  if (error.httpStatus !== null) details.http_status = error.httpStatus;
+  if (error.logId !== null) details.log_id = error.logId;
+  if (error.hint !== null) details.hint = error.hint;
+  return Object.keys(details).length ? details : undefined;
+}
 
 export interface FeishuProbeResult {
   ok: boolean;
@@ -8,43 +25,16 @@ export interface FeishuProbeResult {
   bot_name?: string | null;
   bot_open_id?: string | null;
   error?: string | null;
+  api_error?: FeishuApiErrorDetails;
   raw?: Record<string, any>;
 }
 
 export async function registerAiAgent(client: FeishuAuthClient): Promise<FeishuProbeResult> {
   try {
-    const tenantToken = (await client.getTenantAccessToken()).token;
-    const url = `${client.domains.openBase}${AI_AGENT_PING_PATH}`;
-
-    const response = await client.fetchFn(url, {
+    const payload = await client.requestWithTenantToken(AI_AGENT_PING_PATH, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${tenantToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ needBotInfo: true }),
-      signal: AbortSignal.timeout(client.timeoutMs),
+      body: { needBotInfo: true },
     });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      return {
-        ok: false,
-        app_id: client.appId,
-        error: `HTTP ${response.status}: ${errText}`,
-      };
-    }
-
-    const payload = await response.json();
-    if (payload?.code !== 0 && payload?.code !== undefined && payload?.code !== null) {
-      return {
-        ok: false,
-        app_id: client.appId,
-        error: payload.msg || payload.message || "Unknown error",
-        raw: payload,
-      };
-    }
 
     const botInfo = payload?.data?.pingBotInfo || {};
     return {
@@ -55,10 +45,12 @@ export async function registerAiAgent(client: FeishuAuthClient): Promise<FeishuP
       raw: payload,
     };
   } catch (exc: any) {
+    const details = apiErrorDetails(exc);
     return {
       ok: false,
       app_id: client.appId,
       error: exc?.message || String(exc),
+      ...(details ? { api_error: details } : {}),
     };
   }
 }

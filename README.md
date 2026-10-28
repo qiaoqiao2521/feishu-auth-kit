@@ -59,6 +59,45 @@ ControlMesh、Claude Code、OpenClaw，或者自定义脚本，都可以复用�
 | Orchestration | pending flow registry、scope merge、batch planning、synthetic retry |
 | Claude surface | 面向 Claude / tool caller 的轻量 JSON wrapper |
 
+### 上游兼容性更新（2026-10-28）
+
+- 按 OpenClaw 10 月 25 日的修复补齐显式 assistant message 边界，工具调用前的正文可与后续累计快照一起保留。
+- 定时卡片更新失败通过 `lastFlushError` 暴露，后续显式更新可恢复；终态投递失败继续向调用方传播。
+- Python / TypeScript OAuth 轮询兼容 HTTP 400 的 `authorization_pending` / `slow_down`，到期后停止请求。
+- 上游追踪器保留敏感模块的相关性，按破坏性变更、安全和认证行为信号分级；测试文件变更不再仅凭路径升级为 P1。
+
+示例：在 runner 发出新的 assistant message 事件时调用边界 API；工具结果本身不需要写入正文。
+
+```typescript
+import { StreamingCardController } from "feishu-auth-kit";
+
+const card = new StreamingCardController({ onFlush: updateExistingCard });
+card.startAssistantMessage();
+await card.updateAssistantMessage("我先查一下。");
+// 工具完成后，runner 开始下一条 assistant message。
+card.startAssistantMessage();
+await card.updateAssistantMessage("查到了");
+await card.updateAssistantMessage("查到了，结果如下。");
+await card.complete(); // 保留两条消息的正文
+```
+
+`updateContent()` 和 `complete(finalText)` 仍覆盖整张卡片的正文。
+本轮上游判断和验证记录见 [2026-10-28 同步记录](docs/upstream-sync-2026-10-28.md)。
+
+### 上轮兼容性更新（2026-10-15）
+
+- TypeScript 交互分发支持 `action.name`、`form_submit.form_name` 和 `formValue`，
+  可读取 SDK 直接传入或 webhook envelope 中的 `operator`。
+- Python / TypeScript 入站解析支持富文本 `post` 的标题、段落、链接、提及和代码块；
+  多行 prompt 保留换行、代码缩进和代码内部的反引号。
+- TypeScript 流式卡片在完成、取消或失败时先等待在途更新，再发送最终快照；
+  首次终态生效，所有终态调用共享投递结果。
+- Python / TypeScript 的 `FeishuApiError` 保留业务错误码、HTTP 状态和日志 ID，
+  `21001` 增加访问控制排查提示。
+
+上轮提交、issues、兼容性说明与验证方法见
+[2026-10-15 同步记录](docs/upstream-sync-2026-10-15.md)。
+
 ## 它不是什么
 
 - 它不是 ControlMesh 本体。

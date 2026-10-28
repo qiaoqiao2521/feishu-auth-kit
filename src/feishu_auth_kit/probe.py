@@ -3,9 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .client import FeishuAuthClient
+from .client import FeishuApiError, FeishuAuthClient
 
 AI_AGENT_PING_PATH = "/open-apis/bot/v1/openclaw_bot/ping"
+
+
+def api_error_details(error: Exception) -> dict[str, Any] | None:
+    if not isinstance(error, FeishuApiError):
+        return None
+    details = {
+        "code": error.code,
+        "http_status": error.http_status,
+        "log_id": error.log_id,
+        "hint": error.hint,
+    }
+    return {key: value for key, value in details.items() if value is not None} or None
 
 
 @dataclass(frozen=True)
@@ -16,6 +28,7 @@ class FeishuProbeResult:
     bot_open_id: str | None = None
     error: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+    api_error: dict[str, Any] | None = None
 
 
 def register_ai_agent(client: FeishuAuthClient) -> FeishuProbeResult:
@@ -29,7 +42,9 @@ def register_ai_agent(client: FeishuAuthClient) -> FeishuProbeResult:
             json={"needBotInfo": True},
         )
     except Exception as exc:
-        return FeishuProbeResult(ok=False, app_id=client.app_id, error=str(exc))
+        return FeishuProbeResult(
+            ok=False, app_id=client.app_id, error=str(exc), api_error=api_error_details(exc)
+        )
 
     bot_info = payload.get("data", {}).get("pingBotInfo") or {}
     return FeishuProbeResult(

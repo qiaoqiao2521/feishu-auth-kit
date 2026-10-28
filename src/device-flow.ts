@@ -53,6 +53,35 @@ export class DeviceFlowClient {
     return items.join(" ");
   }
 
+  private async responsePayload(response: Response): Promise<Record<string, any>> {
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new DeviceFlowError(response.ok
+        ? "Invalid device flow response"
+        : `HTTP error ${response.status}`);
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new DeviceFlowError(response.ok
+        ? "Invalid device flow response"
+        : `HTTP error ${response.status}`);
+    }
+    return payload as Record<string, any>;
+  }
+
+  private errorDetail(payload: Record<string, any>, fallback: string, deviceCode?: string): string {
+    const detail = typeof payload.error_description === "string" && payload.error_description
+      ? payload.error_description
+      : typeof payload.error === "string" && payload.error ? payload.error : fallback;
+    let message = detail;
+    const basic = Buffer.from(`${this.appId}:${this.appSecret}`).toString("base64");
+    for (const credential of [this.appSecret, basic, deviceCode]) {
+      if (credential) message = message.split(credential).join("[REDACTED]");
+    }
+    return message;
+  }
+
   async requestAuthorization(scopes: Iterable<string>): Promise<DeviceAuthorization> {
     const scopeStr = DeviceFlowClient.scopeString(scopes);
     const basic = Buffer.from(`${this.appId}:${this.appSecret}`).toString("base64");
@@ -73,15 +102,9 @@ export class DeviceFlowClient {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      throw new DeviceFlowError(`HTTP error ${response.status}: ${errText}`);
-    }
-
-    const payload = await response.json();
-    if (payload.error) {
-      const detail = payload.error_description || payload.error;
-      throw new DeviceFlowError(String(detail));
+    const payload = await this.responsePayload(response);
+    if (!response.ok || payload.error) {
+      throw new DeviceFlowError(this.errorDetail(payload, `HTTP error ${response.status}`));
     }
 
     return {
@@ -106,8 +129,11 @@ export class DeviceFlowClient {
     const deadline = Date.now() + expiresInSec * 1000;
     let currentInterval = Math.max(intervalSec, 1);
 
-    while (Date.now() < deadline) {
-      await this.sleeper(currentInterval * 1000);
+    while (true) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      await this.sleeper(Math.min(currentInterval * 1000, remainingMs));
+      if (Date.now() >= deadline) break;
 
       const body = new URLSearchParams({
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
@@ -126,15 +152,15 @@ export class DeviceFlowClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
 
-      if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        throw new DeviceFlowError(`HTTP error ${response.status}: ${errText}`);
+      // OAuth device polling uses HTTP 400 for pending/slow_down. Other HTTP
+      // failures must remain terminal even if their body contains those names.
+      if (!response.ok && response.status !== 400) {
+        throw new DeviceFlowError(`HTTP error ${response.status}`);
       }
-
-      const payload = await response.json();
+      const payload = await this.responsePayload(response);
       const error = payload.error;
 
-      if (!error && payload.access_token) {
+      if (response.ok && !error && typeof payload.access_token === "string" && payload.access_token) {
         return {
           access_token: String(payload.access_token),
           refresh_token: payload.refresh_token ?? null,
@@ -152,8 +178,11 @@ export class DeviceFlowClient {
         continue;
       }
 
-      const detail = payload.error_description || error || "Device flow failed";
-      throw new DeviceFlowError(String(detail));
+      throw new DeviceFlowError(this.errorDetail(
+        payload,
+        response.ok ? "Device flow failed" : `HTTP error ${response.status}`,
+        deviceCode,
+      ));
     }
 
     throw new DeviceFlowError("Device code expired before authorization completed");

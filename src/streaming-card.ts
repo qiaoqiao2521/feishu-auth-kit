@@ -23,10 +23,12 @@ export class StreamingCardController {
   private title: string;
   private reasoningContent: string = "";
   private mainContent: string = "";
+  private assistantMessageBase: string = "";
   private errorMessage: string | null = null;
   private readonly flushController: FlushController;
   private readonly throttleMs: number;
   private readonly onFlushCallback?: (cardPayload: Record<string, any>) => Promise<void>;
+  private finalizationPromise: Promise<void> | null = null;
 
   constructor(options: StreamingCardOptions = {}) {
     this.title = options.title ?? "Agent Working...";
@@ -58,15 +60,49 @@ export class StreamingCardController {
     return this.reasoningContent;
   }
 
+  /** Last streaming flush failure; cleared by a successful streaming flush. */
+  get lastFlushError(): unknown | null {
+    return this.flushController.lastFlushError;
+  }
+
   /**
-   * Append a token chunk to main streaming response.
+   * Freeze prior prose before a new assistant message, such as after a tool call.
+   * Subsequent message snapshots replace only the text after this boundary.
+   * Calling this without adding text does not insert an empty paragraph.
+   */
+  startAssistantMessage(): void {
+    if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
+      return;
+    }
+    this.assistantMessageBase = this.mainContent;
+  }
+
+  /**
+   * Set the cumulative snapshot for the current assistant message.
+   * Unlike updateContent(), this preserves prose frozen by startAssistantMessage().
+   * Snapshots are authoritative, including corrections to shorter or empty text.
+   */
+  async updateAssistantMessage(text: string): Promise<void> {
+    if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
+      return;
+    }
+    this.state = "streaming";
+    this.mainContent = this.assistantMessageBase && text
+      ? `${this.assistantMessageBase}\n\n${text}`
+      : this.assistantMessageBase || text;
+    await this.flushController.throttledUpdate(this.throttleMs);
+  }
+
+  /**
+   * Append a token chunk to the current message, preserving any explicit boundary.
    */
   async appendToken(token: string): Promise<void> {
     if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
       return;
     }
     this.state = "streaming";
-    this.mainContent += token;
+    const startsMessage = this.assistantMessageBase && this.mainContent === this.assistantMessageBase;
+    this.mainContent += startsMessage && token ? `\n\n${token}` : token;
     await this.flushController.throttledUpdate(this.throttleMs);
   }
 
@@ -83,59 +119,75 @@ export class StreamingCardController {
   }
 
   /**
-   * Replace full main content and trigger throttled update.
+   * Replace full main content, reset any message boundary, and trigger throttled update.
    */
   async updateContent(text: string): Promise<void> {
     if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
       return;
     }
     this.state = "streaming";
+    this.assistantMessageBase = "";
     this.mainContent = text;
     await this.flushController.throttledUpdate(this.throttleMs);
   }
 
   /**
-   * Complete streaming with optional final override text, flushing immediately.
+   * Complete streaming with optional final override text and await delivery.
+   * The first terminal operation wins; later terminal calls share its result.
    */
-  async complete(finalText?: string): Promise<void> {
-    if (this.state === "completed") return;
-    this.state = "completed";
-    if (finalText !== undefined) {
-      this.mainContent = finalText;
-    }
-    this.flushController.cancelPendingFlush();
-    await this.flushController.flush();
-    this.flushController.complete();
+  complete(finalText?: string): Promise<void> {
+    return this.finalize("completed", () => {
+      if (finalText !== undefined) {
+        this.mainContent = finalText;
+      }
+    });
   }
 
   /**
    * Abort streaming.
    */
-  async abort(reason: string = "Aborted by user"): Promise<void> {
-    if (this.state === "completed" || this.state === "aborted") return;
-    this.state = "aborted";
-    this.mainContent += `\n\n*(Cancelled: ${reason})*`;
-    this.flushController.cancelPendingFlush();
-    await this.flushController.flush();
-    this.flushController.complete();
+  abort(reason: string = "Aborted by user"): Promise<void> {
+    return this.finalize("aborted", () => {
+      this.mainContent += `\n\n*(Cancelled: ${reason})*`;
+    });
   }
 
   /**
    * Mark stream as error and flush card.
    */
-  async error(err: Error | string): Promise<void> {
-    this.state = "error";
-    this.errorMessage = typeof err === "string" ? err : err.message;
-    this.flushController.cancelPendingFlush();
-    await this.flushController.flush();
+  error(err: Error | string): Promise<void> {
+    return this.finalize("error", () => {
+      this.errorMessage = typeof err === "string" ? err : err.message;
+    });
+  }
+
+  private finalize(
+    state: "completed" | "error" | "aborted",
+    update: () => void
+  ): Promise<void> {
+    if (this.finalizationPromise) return this.finalizationPromise;
+
+    this.state = state;
+    update();
+    const payload = this.buildCardPayload();
+
+    // Stop timers and reflush scheduling before draining the current request.
+    // Sending the final snapshot separately keeps it out of the flush mutex's
+    // early-return path and prevents an older request from overwriting it.
     this.flushController.complete();
+    this.finalizationPromise = this.flushController.waitForFlush().then(async () => {
+      if (this.onFlushCallback) {
+        await this.onFlushCallback(payload);
+      }
+    });
+    return this.finalizationPromise;
   }
 
   /**
-   * Wait for any current flush network request to finish.
+   * Wait for the current flush, including final delivery once terminating.
    */
   async waitForFlush(): Promise<void> {
-    await this.flushController.waitForFlush();
+    await (this.finalizationPromise ?? this.flushController.waitForFlush());
   }
 
   /**

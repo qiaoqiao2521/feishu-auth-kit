@@ -23,10 +23,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
-
 
 API_ROOT = "https://api.github.com"
 DEFAULT_OWNER = "qiaoqiao2521"
@@ -164,7 +164,7 @@ class UpstreamStateStore:
         if not os.path.exists(filepath):
             return cls()
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
             return cls.from_dict(data)
         except Exception as exc:
@@ -216,7 +216,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         "--per-target-limit",
         type=int,
         default=100,
-        help="Maximum number of commits to fetch and inspect per upstream target.",
+        help="Maximum commits to inspect per target; oldest pending commits are processed first.",
     )
     parser.add_argument(
         "--cycle",
@@ -243,6 +243,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Path to offline JSON issues corpus for offline evaluation / testing.",
     )
     parsed = parser.parse_args(args)
+    if parsed.per_target_limit < 1:
+        parser.error("--per-target-limit must be at least 1")
     if parsed.owner is None or parsed.repo is None:
         repository = os.environ.get("GITHUB_REPOSITORY") or f"{DEFAULT_OWNER}/{DEFAULT_REPO}"
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+", repository):
@@ -323,7 +325,8 @@ class GitHubSession:
                 if is_transient and retries < self._max_retries:
                     wait_sec = float(retry_after) if retry_after else backoff
                     print(
-                        f"GitHub API {method} {path} failed with {status}, retrying in {wait_sec:.1f}s "
+                        f"GitHub API {method} {path} failed with {status}, "
+                        f"retrying in {wait_sec:.1f}s "
                         f"(attempt {retries + 1}/{self._max_retries})...",
                         file=sys.stderr,
                     )
@@ -447,6 +450,48 @@ def is_breaking_change(message: str) -> bool:
     )
 
 
+def is_test_file(filename: str) -> bool:
+    """Recognize tests and shared fixtures even when they live beside runtime code."""
+    parts = filename.lower().split("/")
+    basename = parts[-1]
+    return (
+        any(
+            part in {"test", "tests", "__tests__", "fixtures", "__fixtures__", "test-support"}
+            for part in parts
+        )
+        or basename.startswith(("test_", "test-"))
+        or any(
+            marker in basename for marker in (".test.", ".spec.", "test-support", "test-helpers")
+        )
+    )
+
+
+def critical_change_reason(message: str, *, is_auth: bool) -> str | None:
+    """Require an explicit behavior signal; sensitive filenames alone are not critical."""
+    if is_breaking_change(message):
+        return "breaking-change"
+    if re.search(
+        r"\b(?:security|cve-\d{4}-\d+|vulnerability|ssrf|csrf|credential leak|"
+        r"token leak|auth(?:entication|orization)? bypass|permission bypass)\b",
+        message,
+        re.IGNORECASE,
+    ):
+        return "security-change"
+    first_line = message.splitlines()[0].lower()
+    if (
+        is_auth
+        and re.match(r"(?:fix|feat)(?:\([^)]*\))?!?:", first_line)
+        and re.search(
+            r"\b(?:(?<![-\w])auth(?![-\w])|oauth|authentication|authorization|"
+            r"tokens?|device[- ]flow|"
+            r"scope|scopes|permission|permissions|secretref|app[- ]registration)\b",
+            first_line,
+        )
+    ):
+        return "auth-behavior-change"
+    return None
+
+
 def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCommit | None:
     commit_info = detail.get("commit", {})
     raw_message = commit_info.get("message", "").strip()
@@ -463,7 +508,9 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
         or commit_info.get("author", {}).get("date")
         or ""
     )
-    author = commit_info.get("author", {}).get("name") or detail.get("author", {}).get("login") or ""
+    author = (
+        commit_info.get("author", {}).get("name") or detail.get("author", {}).get("login") or ""
+    )
     sha = detail.get("sha", "")
     html_url = detail.get("html_url") or f"https://github.com/{target.repo}/commit/{sha}"
 
@@ -482,19 +529,25 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
         return None
 
     # Version sync noise in plugin mode
-    if target.mode == "plugin" and lower_message.startswith(("feat: sync version", "chore: sync version", "bump version")):
+    if target.mode == "plugin" and lower_message.startswith(
+        ("feat: sync version", "chore: sync version", "bump version")
+    ):
         if not any(f.startswith("src/") for f in lower_files):
             return None
 
     reasons: list[str] = []
-    breaking = is_breaking_change(first_line)
+    breaking = is_breaking_change(raw_message)
     if breaking:
         reasons.append("breaking-change")
 
     if target.mode == "plugin":
         # Target is larksuite/openclaw-lark (the dedicated Feishu/Lark plugin)
         has_src = any(f.startswith("src/") for f in lower_files)
-        has_tests = any(f.startswith("tests/") or f.startswith("test/") for f in lower_files)
+        has_tests = any(is_test_file(f) for f in lower_files)
+        runtime_files = [
+            f for f in lower_files if not is_test_file(f) and not is_all_noise_files([f])
+        ]
+        has_runtime_src = any(f.startswith("src/") for f in runtime_files)
         has_manifest = any("openclaw.plugin.json" in f for f in lower_files)
         has_dependency = any("package.json" in f for f in lower_files)
 
@@ -504,11 +557,26 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
         # Check signal areas
         is_card = any(
             k in lower_message or any(k in f for f in lower_files)
-            for k in ("card", "interactive", "reply-dispatcher", "cardkit", "card-action", "form-submit")
+            for k in (
+                "card",
+                "interactive",
+                "reply-dispatcher",
+                "cardkit",
+                "card-action",
+                "form-submit",
+            )
         )
         is_auth = any(
             k in lower_message or any(k in f for f in lower_files)
-            for k in ("auth", "oauth", "token", "device-flow", "scope", "secretref", "app-registration")
+            for k in (
+                "auth",
+                "oauth",
+                "token",
+                "device-flow",
+                "scope",
+                "secretref",
+                "app-registration",
+            )
         )
         is_inbound = any(
             k in lower_message or any(k in f for f in lower_files)
@@ -532,13 +600,16 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
             elif has_tests:
                 reasons.append("feishu-test")
 
-        # Escalation rule for plugin
-        if breaking or is_auth or is_card:
+        critical_reason = critical_change_reason(raw_message, is_auth=is_auth)
+        if runtime_files and critical_reason:
+            reasons.append(critical_reason)
             escalation = EscalationLevel.P1_CRITICAL
-        elif has_src or is_inbound:
+        elif has_runtime_src:
             escalation = EscalationLevel.P2_NOTICE
         else:
             escalation = EscalationLevel.P3_ROUTINE
+            if has_tests:
+                reasons.append("feishu-test")
 
         return CandidateCommit(
             target_key=target.key,
@@ -566,9 +637,9 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
             other_platform_files = [
                 f for f in lower_files if any(f.startswith(p) for p in UNRELATED_EXTENSIONS)
             ]
-            if other_platform_files and len(other_platform_files) == len([
-                f for f in lower_files if not is_all_noise_files([f])
-            ]):
+            if other_platform_files and len(other_platform_files) == len(
+                [f for f in lower_files if not is_all_noise_files([f])]
+            ):
                 unrelated_only = True
 
         if unrelated_only:
@@ -576,7 +647,8 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
 
         # 2. Check for Core Channel / CardKit Contract relevance in plugin-sdk
         contract_files = [
-            f for f in lower_files
+            f
+            for f in lower_files
             if ("plugin-sdk" in f or "src/plugin-sdk" in f)
             and not f.endswith(DOC_EXTENSIONS)
             and not f.startswith("docs/")
@@ -590,21 +662,41 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
             if feishu_files:
                 reasons.append("feishu-extension")
 
-            is_card = any("card" in f or "action" in f for f in feishu_files) or "card" in lower_message
-            is_auth = any("auth" in f or "oauth" in f or "registration" in f for f in feishu_files) or "auth" in lower_message
+            is_card = (
+                any("card" in f or "action" in f for f in feishu_files) or "card" in lower_message
+            )
+            is_auth = any(
+                k in lower_message or any(k in f for f in feishu_files)
+                for k in (
+                    "auth", "oauth", "token", "device-flow", "scope", "secretref", "registration"
+                )
+            )
             if is_card:
                 reasons.append("feishu-card")
             if is_auth:
                 reasons.append("feishu-auth")
 
-            if breaking or is_auth or is_card:
+            # Only relevant production files can make this a runtime escalation.
+            relevant_files = feishu_files + contract_files
+            runtime_files = [
+                f for f in relevant_files if not is_test_file(f) and not is_all_noise_files([f])
+            ]
+            critical_reason = critical_change_reason(raw_message, is_auth=is_auth)
+            if runtime_files and critical_reason:
+                reasons.append(critical_reason)
                 escalation = EscalationLevel.P1_CRITICAL
-            else:
+            elif runtime_files:
                 escalation = EscalationLevel.P2_NOTICE
+            else:
+                escalation = EscalationLevel.P3_ROUTINE
+                if any(is_test_file(f) for f in relevant_files):
+                    reasons.append("feishu-test")
 
         elif contract_files:
             reasons.append("core-channel-contract")
-            if breaking:
+            critical_reason = critical_change_reason(raw_message, is_auth=False)
+            if any(not is_test_file(f) for f in contract_files) and critical_reason:
+                reasons.append(critical_reason)
                 escalation = EscalationLevel.P1_CRITICAL
             else:
                 escalation = EscalationLevel.P3_ROUTINE
@@ -634,57 +726,74 @@ def fetch_commits_with_cursor(
     cursor_sha: str | None = None,
     seen_shas: set[str] | None = None,
     since_date: dt.datetime | None = None,
-    max_pages: int = 5,
+    max_pages: int | None = None,
     per_page: int = 30,
     total_limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """Fetch recent commits from upstream repository, paginating until cursor or limit is reached."""
-    all_commits: list[dict[str, Any]] = []
-    seen = seen_shas or set()
-    stop_pagination = False
+    """Return the oldest pending batch after verifying its history boundary.
 
-    for page in range(1, max_pages + 1):
-        if stop_pagination or len(all_commits) >= total_limit:
-            break
+    The inspection limit must not stop history traversal: moving the cursor to
+    the newest limited batch would permanently skip the rest of a backlog.
+    Pin subsequent pages to the first page's HEAD, find the saved cursor, then
+    return at most ``total_limit`` commits nearest that cursor. Lookback applies
+    only to bootstrap runs. A missing cursor or incomplete scan fails closed.
+    """
+    if not 1 <= per_page <= 100 or total_limit < 1:
+        raise ValueError("per_page must be between 1 and 100 and total_limit must be positive")
+    if max_pages is not None and max_pages < 1:
+        raise ValueError("max_pages must be positive when specified")
+
+    pending: deque[dict[str, Any]] = deque(maxlen=total_limit)
+    seen = seen_shas or set()
+    bootstrap_since = since_date if not cursor_sha else None
+    snapshot_sha = branch
+    page = 1
+
+    while True:
+        if max_pages is not None and page > max_pages:
+            raise RuntimeError(
+                f"Incomplete commit history for {repo}: reached {max_pages} pages; "
+                "cursor was not advanced. Increase max_pages and retry."
+            )
         params: dict[str, Any] = {
-            "sha": branch,
+            "sha": snapshot_sha,
             "per_page": per_page,
             "page": page,
         }
-        if since_date:
-            params["since"] = since_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if bootstrap_since:
+            params["since"] = bootstrap_since.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         commits = session.request("GET", f"repos/{repo}/commits", params=params)
-        if not commits:
-            break
+        if page == 1 and commits:
+            snapshot_sha = commits[0]["sha"]
 
-        for item in commits:
+        for item in commits or []:
             sha = item.get("sha", "")
             if cursor_sha and sha == cursor_sha:
-                stop_pagination = True
-                break
+                return list(reversed(pending))
             if sha in seen:
-                stop_pagination = True
-                break
+                # Seen commits need not be contiguous; only last_sha is a boundary.
+                continue
 
             date_str = item.get("commit", {}).get("committer", {}).get("date") or ""
-            if since_date and date_str:
+            if bootstrap_since and date_str:
                 c_date = parse_github_datetime(date_str)
-                if c_date < since_date:
-                    stop_pagination = True
-                    break
+                if c_date < bootstrap_since:
+                    continue
 
-            all_commits.append(item)
-            if len(all_commits) >= total_limit:
-                stop_pagination = True
-                break
+            pending.append(item)
 
-        if len(commits) < per_page:
+        if not commits or len(commits) < per_page:
+            if cursor_sha:
+                raise RuntimeError(
+                    f"Saved cursor {cursor_sha} was not found in {repo}@{branch}; "
+                    "cursor was not advanced. Check for rewritten upstream history "
+                    "before resetting state."
+                )
             break
+        page += 1
 
-    # Return chronological order (oldest to newest)
-    all_commits.reverse()
-    return all_commits
+    return list(reversed(pending))
 
 
 def fetch_commit_detail(session: GitHubSession, *, repo: str, sha: str) -> dict[str, Any]:
@@ -728,7 +837,7 @@ def find_existing_digest_issue(
     target_key: str,
     cycle: str,
 ) -> dict[str, Any] | None:
-    """Find existing open digest issue using standard issues endpoint (avoids search rate limits)."""
+    """Find an open digest using the issues endpoint to avoid search rate limits."""
     try:
         issues = session.request(
             "GET",
@@ -796,14 +905,16 @@ def parse_existing_table_entries(existing_body: str) -> list[dict[str, Any]]:
             else EscalationLevel.P3_ROUTINE
         )
         signals = [s.strip("` ") for s in sig_col.split(",") if s.strip("` ")]
-        entries.append({
-            "short_sha": short_sha,
-            "url": url,
-            "message": msg_col.replace("\\|", "|"),
-            "signals": signals,
-            "level": level,
-            "files_sample": files_col.strip("` "),
-        })
+        entries.append(
+            {
+                "short_sha": short_sha,
+                "url": url,
+                "message": msg_col.replace("\\|", "|"),
+                "signals": signals,
+                "level": level,
+                "files_sample": files_col.strip("` "),
+            }
+        )
     return entries
 
 
@@ -818,13 +929,15 @@ def render_digest_body(
     now_iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     existing_entries = parse_existing_table_entries(existing_body)
-    existing_shas = {e["short_sha"] for e in existing_entries}
 
     combined_candidates = list(candidates)
 
     # Convert existing entries that aren't in new candidates into CandidateCommit objects
     for ent in existing_entries:
-        if not any(c.short_sha == ent["short_sha"] or c.sha.startswith(ent["short_sha"]) for c in candidates):
+        if not any(
+            c.short_sha == ent["short_sha"] or c.sha.startswith(ent["short_sha"])
+            for c in candidates
+        ):
             combined_candidates.append(
                 CandidateCommit(
                     target_key=target.key,
@@ -850,18 +963,21 @@ def render_digest_body(
         checklist_lines.append(f"### 🔥 P1 Critical Escalations ({len(p1_items)})")
         for item in p1_items:
             checklist_lines.append(
-                f"- [ ] **[Breaking/Auth]** [`{item.short_sha}`]({item.html_url}) {item.message} (`{', '.join(item.reasons)}`)"
+                f"- [ ] **[Critical]** [`{item.short_sha}`]({item.html_url}) "
+                f"{item.message} (`{', '.join(item.reasons)}`)"
             )
     if p2_items:
         checklist_lines.append(f"\n### ⚡ P2 Feishu Features & Fixes ({len(p2_items)})")
         for item in p2_items[:15]:
-            checklist_lines.append(
-                f"- [ ] [`{item.short_sha}`]({item.html_url}) {item.message}"
-            )
+            checklist_lines.append(f"- [ ] [`{item.short_sha}`]({item.html_url}) {item.message}")
         if len(p2_items) > 15:
             checklist_lines.append(f"- *...and {len(p2_items) - 15} more P2 items (see ledger)*")
 
-    checklist_block = "\n".join(checklist_lines) if checklist_lines else "- [x] No pending action items in this cycle."
+    checklist_block = (
+        "\n".join(checklist_lines)
+        if checklist_lines
+        else "- [x] No pending action items in this cycle."
+    )
 
     # Build table
     table_lines = [
@@ -884,7 +1000,8 @@ def render_digest_body(
             files_sample += f" (+{len(item.filenames) - 3})"
 
         table_lines.append(
-            f"| {level_badge} | [`{item.short_sha}`]({item.html_url}) | {short_msg} | `{sig_str}` | `{files_sample}` |"
+            f"| {level_badge} | [`{item.short_sha}`]({item.html_url}) | {short_msg} "
+            f"| `{sig_str}` | `{files_sample}` |"
         )
     table_block = "\n".join(table_lines)
 
@@ -921,7 +1038,9 @@ def render_digest_body(
         f"- **Upstream**: [`{target.repo}`](https://github.com/{target.repo}) (`{target.branch}`)\n"
         f"- **Cycle**: `{cycle}`\n"
         f"- **Last Synced**: `{now_iso}`\n"
-        f"- **Monitored Commits**: {len(combined_candidates)} (🔥 {len(p1_items)} critical, ⚡ {len(p2_items)} notice, ℹ️ {len(p3_items)} routine)\n\n"
+        f"- **Monitored Commits**: {len(combined_candidates)} "
+        f"(🔥 {len(p1_items)} critical, ⚡ {len(p2_items)} notice, "
+        f"ℹ️ {len(p3_items)} routine)\n\n"
         f"## 🚦 Sync Action Items\n\n"
         f"{checklist_block}\n\n"
         f"## 📋 Commit Ledger\n\n"
@@ -931,8 +1050,10 @@ def render_digest_body(
         f"{details_block}\n"
         f"</details>\n\n"
         f"## 🛠 Upstream Sync Guide for feishu-auth-kit\n\n"
-        f"1. For **P1 Critical** changes: check auth scopes, OAuth device-flow params, or card-action JSON schema.\n"
-        f"2. For **P2 Notice** changes: test native inbound envelope parser and CardKit rendering.\n"
+        f"1. For **P1 Critical** changes: check auth scopes, OAuth device-flow params, "
+        f"or card-action JSON schema.\n"
+        f"2. For **P2 Notice** changes: test native inbound envelope parser "
+        f"and CardKit rendering.\n"
         f"3. Check off items above as they are verified or integrated.\n\n"
         f"---\n"
         f"{state_marker}\n"
@@ -945,7 +1066,7 @@ def evaluate_offline_corpus(
     targets: tuple[WatchTarget, ...] = TARGETS,
 ) -> dict[str, Any]:
     """Run offline evaluation on saved issues corpus."""
-    with open(corpus_path, "r", encoding="utf-8") as f:
+    with open(corpus_path, encoding="utf-8") as f:
         issues = json.load(f)
 
     target_map = {t.key: t for t in targets}
@@ -1005,7 +1126,6 @@ def evaluate_offline_corpus(
         cand = classify_commit(target, mock_detail)
         if cand is None:
             stats["escalation_distribution"]["FILTERED_NOISE"] += 1
-            cat = "NOISE"
             if is_low_signal_commit(summary):
                 reason = "low_signal_commit"
             elif is_all_noise_files(files):
@@ -1079,12 +1199,18 @@ def main(argv: list[str] | None = None) -> int:
             issue_body_text = existing_issue.get("body", "")
             embedded_state = UpstreamStateStore.extract_from_text(issue_body_text)
             if embedded_state:
-                print(f"Recovered cursor for {target.key} from issue #{existing_issue['number']}: {embedded_state.get('last_sha')}")
+                print(
+                    f"Recovered cursor for {target.key} from issue #{existing_issue['number']}: "
+                    f"{embedded_state.get('last_sha')}"
+                )
                 target_state.last_sha = embedded_state.get("last_sha", "")
                 target_state.last_date = embedded_state.get("last_date", "")
                 target_state.seen_shas = embedded_state.get("seen_shas", [])
 
-        print(f"[{target.key}] Fetching commits from {target.repo} ({target.branch})...", file=sys.stderr)
+        print(
+            f"[{target.key}] Fetching commits from {target.repo} ({target.branch})...",
+            file=sys.stderr,
+        )
         raw_commits = fetch_commits_with_cursor(
             session,
             repo=target.repo,
@@ -1092,8 +1218,7 @@ def main(argv: list[str] | None = None) -> int:
             cursor_sha=target_state.last_sha or None,
             seen_shas=set(target_state.seen_shas),
             since_date=since_date,
-            max_pages=5,
-            per_page=min(50, args.per_target_limit),
+            per_page=100,
             total_limit=args.per_target_limit,
         )
         print(f"[{target.key}] Inspecting {len(raw_commits)} commits...", file=sys.stderr)
@@ -1122,22 +1247,26 @@ def main(argv: list[str] | None = None) -> int:
         target_state.active_cycle = cycle
 
         if not new_candidates and existing_issue:
-            summary_results.append({
-                "target": target.key,
-                "action": "no_change",
-                "cycle": cycle,
-                "issue_number": existing_issue.get("number"),
-                "new_commits": 0,
-            })
+            summary_results.append(
+                {
+                    "target": target.key,
+                    "action": "no_change",
+                    "cycle": cycle,
+                    "issue_number": existing_issue.get("number"),
+                    "new_commits": 0,
+                }
+            )
             continue
 
         if not new_candidates and not existing_issue:
-            summary_results.append({
-                "target": target.key,
-                "action": "no_candidates",
-                "cycle": cycle,
-                "new_commits": 0,
-            })
+            summary_results.append(
+                {
+                    "target": target.key,
+                    "action": "no_candidates",
+                    "cycle": cycle,
+                    "new_commits": 0,
+                }
+            )
             continue
 
         # Render new or updated digest body
@@ -1155,14 +1284,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Action: {'UPDATE' if existing_issue else 'CREATE'}")
             print(f"New candidate commits ({len(new_candidates)}):")
             for cand in new_candidates:
-                print(f"  [{cand.escalation.value}] {cand.short_sha}: {cand.message} ({', '.join(cand.reasons)})")
-            summary_results.append({
-                "target": target.key,
-                "action": "dry_run_update" if existing_issue else "dry_run_create",
-                "cycle": cycle,
-                "new_commits": len(new_candidates),
-                "title": title,
-            })
+                print(
+                    f"  [{cand.escalation.value}] {cand.short_sha}: {cand.message} "
+                    f"({', '.join(cand.reasons)})"
+                )
+            summary_results.append(
+                {
+                    "target": target.key,
+                    "action": "dry_run_update" if existing_issue else "dry_run_create",
+                    "cycle": cycle,
+                    "new_commits": len(new_candidates),
+                    "title": title,
+                }
+            )
         else:
             if existing_issue:
                 # Update existing issue
@@ -1173,13 +1307,15 @@ def main(argv: list[str] | None = None) -> int:
                     body={"body": body},
                 )
                 target_state.active_issue_number = issue_num
-                summary_results.append({
-                    "target": target.key,
-                    "action": "updated",
-                    "cycle": cycle,
-                    "issue_number": issue_num,
-                    "new_commits": len(new_candidates),
-                })
+                summary_results.append(
+                    {
+                        "target": target.key,
+                        "action": "updated",
+                        "cycle": cycle,
+                        "issue_number": issue_num,
+                        "new_commits": len(new_candidates),
+                    }
+                )
             else:
                 # Create new digest issue
                 labels = [LABEL_NAME, f"upstream:{target.key}", f"cycle:{cycle}"]
@@ -1189,13 +1325,15 @@ def main(argv: list[str] | None = None) -> int:
                     body={"title": title, "body": body, "labels": labels},
                 )
                 target_state.active_issue_number = created["number"]
-                summary_results.append({
-                    "target": target.key,
-                    "action": "created",
-                    "cycle": cycle,
-                    "issue_number": created["number"],
-                    "new_commits": len(new_candidates),
-                })
+                summary_results.append(
+                    {
+                        "target": target.key,
+                        "action": "created",
+                        "cycle": cycle,
+                        "issue_number": created["number"],
+                        "new_commits": len(new_candidates),
+                    }
+                )
 
     # Save state to disk
     if not args.dry_run:

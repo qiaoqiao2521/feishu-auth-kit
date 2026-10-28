@@ -23,6 +23,38 @@ from scripts.upstream_watch import (  # noqa: E402
 )
 
 
+def test_issue_target_defaults_to_migrated_repository(monkeypatch) -> None:
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    args = upstream_watch.parse_args([])
+    assert (args.owner, args.repo) == ("qiaoqiao2521", "feishu-auth-kit")
+
+
+def test_issue_target_follows_workflow_repository(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "another-owner/renamed-kit")
+    args = upstream_watch.parse_args([])
+    assert (args.owner, args.repo) == ("another-owner", "renamed-kit")
+
+
+def test_explicit_issue_target_overrides_workflow_repository(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "another-owner/renamed-kit")
+    args = upstream_watch.parse_args(["--owner", "explicit-owner", "--repo", "explicit-kit"])
+    assert (args.owner, args.repo) == ("explicit-owner", "explicit-kit")
+
+
+def test_partial_issue_target_override_uses_workflow_default(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "another-owner/renamed-kit")
+    args = upstream_watch.parse_args(["--repo", "explicit-kit"])
+    assert (args.owner, args.repo) == ("another-owner", "explicit-kit")
+
+
+@pytest.mark.parametrize("repository", ["missing-repo", "owner/", "owner/repo/extra"])
+def test_invalid_workflow_repository_cannot_choose_issue_target(monkeypatch, repository) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", repository)
+    with pytest.raises(SystemExit) as exc:
+        upstream_watch.parse_args([])
+    assert exc.value.code == 2
+
+
 def test_get_current_cycle() -> None:
     sample_date = dt.datetime(2026, 9, 14, 12, 0, 0, tzinfo=dt.timezone.utc)
     assert get_current_cycle("weekly", sample_date) == "2026-W38"
@@ -155,7 +187,7 @@ def test_classify_core_filtering() -> None:
     }
     cand = classify_commit(target, feishu_detail)
     assert cand is not None
-    assert cand.escalation == EscalationLevel.P1_CRITICAL  # touches card-action
+    assert cand.escalation == EscalationLevel.P2_NOTICE  # filename alone is not critical
     assert "feishu-card" in cand.reasons
     assert "feishu-extension" in cand.reasons
 
@@ -176,6 +208,116 @@ def test_classify_core_filtering() -> None:
     assert cand_contract is not None
     assert cand_contract.escalation == EscalationLevel.P3_ROUTINE
     assert "core-channel-contract" in cand_contract.reasons
+
+
+@pytest.mark.parametrize("mode", ["plugin", "core"])
+@pytest.mark.parametrize(
+    ("message", "path", "expected", "reason"),
+    [
+        (
+            "test(feishu): remove low-value auth and card tests",
+            "auth.test.ts",
+            EscalationLevel.P3_ROUTINE,
+            "feishu-test",
+        ),
+        (
+            "refactor: deslop channel callbacks and UI owners",
+            "card-interaction.ts",
+            EscalationLevel.P2_NOTICE,
+            "feishu-card",
+        ),
+        (
+            "refactor(auth): simplify token owner wiring",
+            "auth.ts",
+            EscalationLevel.P2_NOTICE,
+            "feishu-auth",
+        ),
+        (
+            "fix(feishu): quick-action cards fail to send",
+            "card-action.ts",
+            EscalationLevel.P2_NOTICE,
+            "feishu-card",
+        ),
+        (
+            "fix(feishu): refresh expired OAuth tokens",
+            "auth.ts",
+            EscalationLevel.P1_CRITICAL,
+            "auth-behavior-change",
+        ),
+        (
+            "fix: replace zalouser import with command-auth for OpenClaw compatibility",
+            "auth.ts",
+            EscalationLevel.P2_NOTICE,
+            "feishu-auth",
+        ),
+        (
+            "fix(feishu): refresh expired tokens",
+            "token-store.ts",
+            EscalationLevel.P1_CRITICAL,
+            "auth-behavior-change",
+        ),
+        (
+            "fix(feishu): prevent credential leak in diagnostics",
+            "client.ts",
+            EscalationLevel.P1_CRITICAL,
+            "security-change",
+        ),
+        (
+            "feat(feishu): revise callback payload\n\nBREAKING CHANGE: operator identity moved",
+            "card-action.ts",
+            EscalationLevel.P1_CRITICAL,
+            "breaking-change",
+        ),
+    ],
+)
+def test_severity_requires_runtime_behavior_evidence(mode, message, path, expected, reason) -> None:
+    target = next(target for target in upstream_watch.TARGETS if target.mode == mode)
+    prefix = "src/" if mode == "plugin" else "extensions/feishu/src/"
+    candidate = classify_commit(
+        target,
+        {"sha": "severity", "commit": {"message": message}, "files": [{"filename": prefix + path}]},
+    )
+    assert candidate is not None
+    assert candidate.escalation == expected
+    assert reason in candidate.reasons
+
+
+def test_unrelated_runtime_changes_do_not_escalate_feishu_test_only_change() -> None:
+    target = next(target for target in upstream_watch.TARGETS if target.mode == "core")
+    candidate = classify_commit(
+        target,
+        {
+            "sha": "mixed",
+            "commit": {"message": "fix(security): reject invalid credentials"},
+            "files": [
+                {"filename": "extensions/discord/src/auth.ts"},
+                {"filename": "extensions/feishu/src/auth.test.ts"},
+                {"filename": "test-mock-exports-baseline.txt"},
+            ],
+        },
+    )
+    assert candidate is not None
+    assert candidate.escalation == EscalationLevel.P3_ROUTINE
+
+
+@pytest.mark.parametrize("mode", ["plugin", "core"])
+def test_security_test_fixtures_do_not_trigger_critical_alert(mode) -> None:
+    target = next(target for target in upstream_watch.TARGETS if target.mode == mode)
+    prefix = "src/" if mode == "plugin" else "extensions/feishu/src/"
+    candidate = classify_commit(
+        target,
+        {
+            "sha": "fixtures",
+            "commit": {"message": "test(feishu): add authentication bypass regression"},
+            "files": [
+                {"filename": prefix + "auth.test.ts"},
+                {"filename": prefix + "test-support/auth.ts"},
+                {"filename": "docs/feishu-auth.md"},
+            ],
+        },
+    )
+    assert candidate is not None
+    assert candidate.escalation == EscalationLevel.P3_ROUTINE
 
 
 def test_persistent_state_roundtrip(tmp_path: Path) -> None:

@@ -201,17 +201,11 @@ class CandidateCommit:
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
-    repository = os.environ.get("GITHUB_REPOSITORY", "")
-    repository_parts = repository.split("/")
-    if len(repository_parts) == 2 and all(repository_parts):
-        default_owner, default_repo = repository_parts
-    else:
-        default_owner, default_repo = DEFAULT_OWNER, DEFAULT_REPO
     parser = argparse.ArgumentParser(
         description="Watch OpenClaw Feishu upstreams and maintain rolling/cycle sync digests.",
     )
-    parser.add_argument("--owner", default=default_owner, help="Issue target owner.")
-    parser.add_argument("--repo", default=default_repo, help="Issue target repository.")
+    parser.add_argument("--owner", help="Issue target owner (default: current workflow owner).")
+    parser.add_argument("--repo", help="Issue target repository (default: current workflow repo).")
     parser.add_argument(
         "--lookback-days",
         type=int,
@@ -251,6 +245,15 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parsed = parser.parse_args(args)
     if parsed.per_target_limit < 1:
         parser.error("--per-target-limit must be at least 1")
+    if parsed.owner is None or parsed.repo is None:
+        repository = os.environ.get("GITHUB_REPOSITORY") or f"{DEFAULT_OWNER}/{DEFAULT_REPO}"
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+", repository):
+            parser.error("GITHUB_REPOSITORY must be an owner/repository pair")
+        owner, repo = repository.split("/")
+        if parsed.owner is None:
+            parsed.owner = owner
+        if parsed.repo is None:
+            parsed.repo = repo
     return parsed
 
 
@@ -447,6 +450,48 @@ def is_breaking_change(message: str) -> bool:
     )
 
 
+def is_test_file(filename: str) -> bool:
+    """Recognize tests and shared fixtures even when they live beside runtime code."""
+    parts = filename.lower().split("/")
+    basename = parts[-1]
+    return (
+        any(
+            part in {"test", "tests", "__tests__", "fixtures", "__fixtures__", "test-support"}
+            for part in parts
+        )
+        or basename.startswith(("test_", "test-"))
+        or any(
+            marker in basename for marker in (".test.", ".spec.", "test-support", "test-helpers")
+        )
+    )
+
+
+def critical_change_reason(message: str, *, is_auth: bool) -> str | None:
+    """Require an explicit behavior signal; sensitive filenames alone are not critical."""
+    if is_breaking_change(message):
+        return "breaking-change"
+    if re.search(
+        r"\b(?:security|cve-\d{4}-\d+|vulnerability|ssrf|csrf|credential leak|"
+        r"token leak|auth(?:entication|orization)? bypass|permission bypass)\b",
+        message,
+        re.IGNORECASE,
+    ):
+        return "security-change"
+    first_line = message.splitlines()[0].lower()
+    if (
+        is_auth
+        and re.match(r"(?:fix|feat)(?:\([^)]*\))?!?:", first_line)
+        and re.search(
+            r"\b(?:(?<![-\w])auth(?![-\w])|oauth|authentication|authorization|"
+            r"tokens?|device[- ]flow|"
+            r"scope|scopes|permission|permissions|secretref|app[- ]registration)\b",
+            first_line,
+        )
+    ):
+        return "auth-behavior-change"
+    return None
+
+
 def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCommit | None:
     commit_info = detail.get("commit", {})
     raw_message = commit_info.get("message", "").strip()
@@ -491,14 +536,18 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
             return None
 
     reasons: list[str] = []
-    breaking = is_breaking_change(first_line)
+    breaking = is_breaking_change(raw_message)
     if breaking:
         reasons.append("breaking-change")
 
     if target.mode == "plugin":
         # Target is larksuite/openclaw-lark (the dedicated Feishu/Lark plugin)
         has_src = any(f.startswith("src/") for f in lower_files)
-        has_tests = any(f.startswith("tests/") or f.startswith("test/") for f in lower_files)
+        has_tests = any(is_test_file(f) for f in lower_files)
+        runtime_files = [
+            f for f in lower_files if not is_test_file(f) and not is_all_noise_files([f])
+        ]
+        has_runtime_src = any(f.startswith("src/") for f in runtime_files)
         has_manifest = any("openclaw.plugin.json" in f for f in lower_files)
         has_dependency = any("package.json" in f for f in lower_files)
 
@@ -551,13 +600,16 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
             elif has_tests:
                 reasons.append("feishu-test")
 
-        # Escalation rule for plugin
-        if breaking or is_auth or is_card:
+        critical_reason = critical_change_reason(raw_message, is_auth=is_auth)
+        if runtime_files and critical_reason:
+            reasons.append(critical_reason)
             escalation = EscalationLevel.P1_CRITICAL
-        elif has_src or is_inbound:
+        elif has_runtime_src:
             escalation = EscalationLevel.P2_NOTICE
         else:
             escalation = EscalationLevel.P3_ROUTINE
+            if has_tests:
+                reasons.append("feishu-test")
 
         return CandidateCommit(
             target_key=target.key,
@@ -613,23 +665,38 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
             is_card = (
                 any("card" in f or "action" in f for f in feishu_files) or "card" in lower_message
             )
-            is_auth = (
-                any("auth" in f or "oauth" in f or "registration" in f for f in feishu_files)
-                or "auth" in lower_message
+            is_auth = any(
+                k in lower_message or any(k in f for f in feishu_files)
+                for k in (
+                    "auth", "oauth", "token", "device-flow", "scope", "secretref", "registration"
+                )
             )
             if is_card:
                 reasons.append("feishu-card")
             if is_auth:
                 reasons.append("feishu-auth")
 
-            if breaking or is_auth or is_card:
+            # Only relevant production files can make this a runtime escalation.
+            relevant_files = feishu_files + contract_files
+            runtime_files = [
+                f for f in relevant_files if not is_test_file(f) and not is_all_noise_files([f])
+            ]
+            critical_reason = critical_change_reason(raw_message, is_auth=is_auth)
+            if runtime_files and critical_reason:
+                reasons.append(critical_reason)
                 escalation = EscalationLevel.P1_CRITICAL
-            else:
+            elif runtime_files:
                 escalation = EscalationLevel.P2_NOTICE
+            else:
+                escalation = EscalationLevel.P3_ROUTINE
+                if any(is_test_file(f) for f in relevant_files):
+                    reasons.append("feishu-test")
 
         elif contract_files:
             reasons.append("core-channel-contract")
-            if breaking:
+            critical_reason = critical_change_reason(raw_message, is_auth=False)
+            if any(not is_test_file(f) for f in contract_files) and critical_reason:
+                reasons.append(critical_reason)
                 escalation = EscalationLevel.P1_CRITICAL
             else:
                 escalation = EscalationLevel.P3_ROUTINE
@@ -896,7 +963,7 @@ def render_digest_body(
         checklist_lines.append(f"### 🔥 P1 Critical Escalations ({len(p1_items)})")
         for item in p1_items:
             checklist_lines.append(
-                f"- [ ] **[Breaking/Auth]** [`{item.short_sha}`]({item.html_url}) "
+                f"- [ ] **[Critical]** [`{item.short_sha}`]({item.html_url}) "
                 f"{item.message} (`{', '.join(item.reasons)}`)"
             )
     if p2_items:

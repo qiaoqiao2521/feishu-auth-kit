@@ -48,6 +48,40 @@ class DeviceFlowClient:
             items.append("offline_access")
         return " ".join(items)
 
+    @staticmethod
+    def _response_payload(response: Any) -> dict[str, Any]:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            detail = (
+                "Invalid device flow response" if 200 <= status < 300 else f"HTTP error {status}"
+            )
+            raise DeviceFlowError(detail) from None
+        if not isinstance(payload, dict):
+            detail = (
+                "Invalid device flow response" if 200 <= status < 300 else f"HTTP error {status}"
+            )
+            raise DeviceFlowError(detail)
+        return payload
+
+    def _error_detail(
+        self, payload: dict[str, Any], fallback: str, device_code: str | None = None
+    ) -> str:
+        detail = next(
+            (
+                value
+                for value in (payload.get("error_description"), payload.get("error"))
+                if isinstance(value, str) and value
+            ),
+            fallback,
+        )
+        basic = base64.b64encode(f"{self.app_id}:{self.app_secret}".encode()).decode("ascii")
+        for credential in (self.app_secret, basic, device_code):
+            if credential:
+                detail = detail.replace(credential, "[REDACTED]")
+        return detail
+
     def request_authorization(self, scopes: Iterable[str]) -> DeviceAuthorization:
         scope_string = self._scope_string(scopes)
         basic = base64.b64encode(f"{self.app_id}:{self.app_secret}".encode()).decode("ascii")
@@ -61,13 +95,10 @@ class DeviceFlowClient:
             data=urlencode({"client_id": self.app_id, "scope": scope_string}),
             timeout=self.timeout,
         )
-        if hasattr(response, "raise_for_status"):
-            response.raise_for_status()
-        payload = response.json()
+        payload = self._response_payload(response)
         error = payload.get("error")
-        if error:
-            detail = payload.get("error_description") or error
-            raise DeviceFlowError(str(detail))
+        if not 200 <= response.status_code < 300 or error:
+            raise DeviceFlowError(self._error_detail(payload, f"HTTP error {response.status_code}"))
         return DeviceAuthorization(
             device_code=str(payload["device_code"]),
             user_code=str(payload["user_code"]),
@@ -86,10 +117,15 @@ class DeviceFlowClient:
         interval: int = 5,
         expires_in: int = 240,
     ) -> DeviceToken:
-        deadline = time.time() + expires_in
+        deadline = time.monotonic() + expires_in
         current_interval = max(interval, 1)
-        while time.time() < deadline:
-            self.sleeper(current_interval)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self.sleeper(min(current_interval, remaining))
+            if time.monotonic() >= deadline:
+                break
             response = self.session.request(
                 "POST",
                 self.domains.oauth_token_url,
@@ -104,11 +140,14 @@ class DeviceFlowClient:
                 ),
                 timeout=self.timeout,
             )
-            if hasattr(response, "raise_for_status"):
-                response.raise_for_status()
-            payload = response.json()
+            status = response.status_code
+            # Only OAuth 400 and legacy 2xx envelopes may keep polling.
+            if not 200 <= status < 300 and status != 400:
+                raise DeviceFlowError(f"HTTP error {status}")
+            payload = self._response_payload(response)
             error = payload.get("error")
-            if not error and payload.get("access_token"):
+            access_token = payload.get("access_token")
+            if 200 <= status < 300 and not error and isinstance(access_token, str) and access_token:
                 return DeviceToken(
                     access_token=str(payload["access_token"]),
                     refresh_token=payload.get("refresh_token"),
@@ -121,7 +160,7 @@ class DeviceFlowClient:
             if error == "slow_down":
                 current_interval += 5
                 continue
-            detail = payload.get("error_description") or error or "Device flow failed"
-            raise DeviceFlowError(str(detail))
+            fallback = "Device flow failed" if 200 <= status < 300 else f"HTTP error {status}"
+            raise DeviceFlowError(self._error_detail(payload, fallback, device_code))
         raise DeviceFlowError("Device code expired before authorization completed")
 

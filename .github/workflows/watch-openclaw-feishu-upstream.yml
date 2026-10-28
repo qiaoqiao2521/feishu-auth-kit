@@ -27,7 +27,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: watch-openclaw-feishu-upstream
@@ -35,19 +34,22 @@ concurrency:
 
 jobs:
   upstream-watch:
+    permissions:
+      contents: read
+      issues: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
 
       - name: Restore upstream watch state
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .upstream-watch/state.json
           key: upstream-watch-state-${{ github.run_id }}
@@ -56,14 +58,13 @@ jobs:
 
       - name: Run upstream watcher
         env:
+          WATCH_DRY_RUN: ${{ inputs.dry_run }}
+          WATCH_CYCLE: ${{ inputs.cycle || 'weekly' }}
+          WATCH_LOOKBACK_DAYS: ${{ inputs.lookback_days || '14' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DRY_RUN_ARG=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            DRY_RUN_ARG="--dry-run"
+          args=(--cycle "$WATCH_CYCLE" --lookback-days "$WATCH_LOOKBACK_DAYS")
+          if [ "$WATCH_DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
           fi
-          CYCLE="${{ inputs.cycle || 'weekly' }}"
-          LOOKBACK="${{ inputs.lookback_days || '14' }}"
-          python scripts/upstream_watch.py \
-            --owner "${GITHUB_REPOSITORY%/*}" --repo "${GITHUB_REPOSITORY#*/}" \
-            --cycle "$CYCLE" --lookback-days "$LOOKBACK" $DRY_RUN_ARG
+          python scripts/upstream_watch.py "${args[@]}"

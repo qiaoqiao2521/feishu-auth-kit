@@ -2,8 +2,8 @@
  * Throttled flush controller for Feishu CardKit updates.
  *
  * Provides timer-based throttling, mutex-guarded flushing, and reflush-on-conflict.
- * Prevents triggering Feishu card rate limits (approx 3 updates/sec) while ensuring
- * the final state is always delivered without message loss.
+ * Prevents triggering Feishu card rate limits (approx 3 updates/sec). Failed
+ * updates are observable and are never retried without a new explicit update.
  */
 
 export interface ThrottleConstants {
@@ -26,6 +26,7 @@ export class FlushController {
   private lastUpdateTime = 0;
   private isCompleted = false;
   private _cardMessageReady = false;
+  private _lastFlushError: unknown = null;
 
   constructor(
     private readonly doFlush: () => Promise<void>,
@@ -43,6 +44,16 @@ export class FlushController {
     return this.isCompleted;
   }
 
+  /**
+   * Most recent flush failure; cleared after a successful flush.
+   * Deferred flushes cannot reject their scheduling caller, so hosts can inspect
+   * this after waitForFlush(). A new explicit update or flush permits recovery;
+   * pending work is cancelled on failure to avoid automatic network retries.
+   */
+  get lastFlushError(): unknown {
+    return this._lastFlushError;
+  }
+
   /** Cancel any pending deferred flush timer. */
   cancelPendingFlush(): void {
     if (this.pendingFlushTimer) {
@@ -51,7 +62,11 @@ export class FlushController {
     }
   }
 
-  /** Wait for any in-progress flush to finish. */
+  /**
+   * Wait for any in-progress flush to finish, regardless of its result.
+   * Inspect lastFlushError for failures. This allows final delivery to drain an
+   * older failed update before sending its separate terminal snapshot.
+   */
   waitForFlush(): Promise<void> {
     if (!this.flushInProgress) return Promise.resolve();
     return new Promise<void>((resolve) => this.flushResolvers.push(resolve));
@@ -77,6 +92,12 @@ export class FlushController {
     try {
       await this.doFlush();
       this.lastUpdateTime = Date.now();
+      this._lastFlushError = null;
+    } catch (error) {
+      this._lastFlushError = error ?? new Error("Flush failed without an error value", { cause: error });
+      this.needsReflush = false;
+      this.cancelPendingFlush();
+      throw error;
     } finally {
       this.flushInProgress = false;
       const resolvers = this.flushResolvers;
@@ -87,12 +108,18 @@ export class FlushController {
 
       if (this.needsReflush && !this.isCompleted && !this.pendingFlushTimer) {
         this.needsReflush = false;
-        this.pendingFlushTimer = setTimeout(() => {
-          this.pendingFlushTimer = null;
-          void this.flush();
-        }, 0);
+        this.scheduleFlush(0);
       }
     }
+  }
+
+  private scheduleFlush(delay: number): void {
+    this.pendingFlushTimer = setTimeout(() => {
+      this.pendingFlushTimer = null;
+      // flush records the failure for host inspection. A timer has no caller to
+      // await its rejection, so consume it here without initiating another send.
+      void this.flush().catch(() => {});
+    }, delay);
   }
 
   /**
@@ -110,19 +137,13 @@ export class FlushController {
       this.cancelPendingFlush();
       if (elapsed > this.constants.longGapThresholdMs) {
         this.lastUpdateTime = now;
-        this.pendingFlushTimer = setTimeout(() => {
-          this.pendingFlushTimer = null;
-          void this.flush();
-        }, this.constants.batchAfterGapMs);
+        this.scheduleFlush(this.constants.batchAfterGapMs);
       } else {
         await this.flush();
       }
     } else if (!this.pendingFlushTimer) {
       const delay = throttleMs - elapsed;
-      this.pendingFlushTimer = setTimeout(() => {
-        this.pendingFlushTimer = null;
-        void this.flush();
-      }, delay);
+      this.scheduleFlush(delay);
     }
   }
 

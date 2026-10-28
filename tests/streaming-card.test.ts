@@ -73,6 +73,104 @@ describe("StreamingCardController", () => {
     expect(lastPayload.elements.some((e: any) => e.text?.content === "Final answer here.")).toBe(true);
   });
 
+  it("preserves pre-tool prose across cumulative assistant-message snapshots and final delivery", async () => {
+    vi.useFakeTimers();
+    const onFlush = vi.fn().mockResolvedValue(undefined);
+    const controller = new StreamingCardController({ onFlush });
+
+    controller.startAssistantMessage();
+    await controller.updateAssistantMessage("I will check.");
+    controller.startAssistantMessage();
+    await controller.updateAssistantMessage("Found");
+    await controller.updateAssistantMessage("Found the answer.");
+    await controller.complete();
+
+    const expected = "I will check.\n\nFound the answer.";
+    expect(controller.getContent()).toBe(expected);
+    expect(onFlush.mock.calls.at(-1)?.[0].elements[0].text.content).toBe(expected);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("accepts shorter and empty message snapshots without overlap or length guesses", async () => {
+    vi.useFakeTimers();
+    const controller = new StreamingCardController();
+
+    await controller.updateAssistantMessage("A draft that will be corrected.");
+    await controller.updateAssistantMessage("A draft");
+    expect(controller.getContent()).toBe("A draft");
+    await controller.updateAssistantMessage("");
+    expect(controller.getContent()).toBe("");
+
+    await controller.updateAssistantMessage("Earlier prose.");
+    controller.startAssistantMessage();
+    controller.startAssistantMessage();
+    await controller.updateAssistantMessage("Earlier prose. Repeated intentionally.");
+    expect(controller.getContent()).toBe("Earlier prose.\n\nEarlier prose. Repeated intentionally.");
+    await controller.updateAssistantMessage("Earlier");
+    expect(controller.getContent()).toBe("Earlier prose.\n\nEarlier");
+    await controller.updateAssistantMessage("");
+    expect(controller.getContent()).toBe("Earlier prose.");
+    await controller.complete();
+  });
+
+  it("keeps reasoning independent and supports deltas after an explicit message boundary", async () => {
+    vi.useFakeTimers();
+    const controller = new StreamingCardController();
+
+    await controller.updateAssistantMessage("Before tool.");
+    await controller.appendReasoningToken("Plan.");
+    controller.startAssistantMessage();
+    await controller.appendToken("");
+    expect(controller.getContent()).toBe("Before tool.");
+    await controller.appendReasoningToken(" Verify.");
+    await controller.appendToken("After");
+    await controller.appendToken(" tool.");
+
+    expect(controller.getContent()).toBe("Before tool.\n\nAfter tool.");
+    expect(controller.getReasoningContent()).toBe("Plan. Verify.");
+    await controller.complete();
+  });
+
+  it("keeps whole-content replacements and final overrides authoritative", async () => {
+    vi.useFakeTimers();
+    const controller = new StreamingCardController();
+
+    await controller.updateAssistantMessage("Earlier prose.");
+    controller.startAssistantMessage();
+    await controller.updateAssistantMessage("Continuation.");
+    await controller.updateContent("Replacement.");
+    expect(controller.getContent()).toBe("Replacement.");
+    await controller.updateAssistantMessage("Corrected replacement.");
+    expect(controller.getContent()).toBe("Corrected replacement.");
+    controller.startAssistantMessage();
+    await controller.updateAssistantMessage("New continuation.");
+    await controller.complete("Full final answer.");
+    expect(controller.getContent()).toBe("Full final answer.");
+  });
+
+  it("exposes scheduled flush failures while preserving content for later updates", async () => {
+    vi.useFakeTimers();
+    const failure = new Error("streaming network failure");
+    const onFlush = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(undefined);
+    const controller = new StreamingCardController({ onFlush });
+
+    expect(controller.lastFlushError).toBeNull();
+    await controller.updateAssistantMessage("Preview.");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(controller.lastFlushError).toBe(failure);
+    expect(controller.getState()).toBe("streaming");
+    expect(controller.getContent()).toBe("Preview.");
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await controller.updateAssistantMessage("Recovered answer.");
+    expect(controller.lastFlushError).toBeNull();
+    expect(onFlush.mock.calls.at(-1)?.[0].elements[0].text.content).toBe("Recovered answer. ▊");
+    await controller.complete();
+  });
+
   it("handles abort and error states appropriately", async () => {
     let lastPayload: any = null;
     const onFlush = vi.fn().mockImplementation(async (payload) => {
@@ -125,6 +223,8 @@ describe("StreamingCardController", () => {
       await controller.appendToken("late token");
       await controller.appendReasoningToken("late reasoning");
       await controller.updateContent("late replacement");
+      controller.startAssistantMessage();
+      await controller.updateAssistantMessage("late message");
       expect(controller.getState()).toBe(state);
       expect(controller.getReasoningContent()).toBe("");
       expect(onFlush).toHaveBeenCalledTimes(1);

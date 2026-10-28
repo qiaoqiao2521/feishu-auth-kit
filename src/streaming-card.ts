@@ -23,6 +23,7 @@ export class StreamingCardController {
   private title: string;
   private reasoningContent: string = "";
   private mainContent: string = "";
+  private assistantMessageBase: string = "";
   private errorMessage: string | null = null;
   private readonly flushController: FlushController;
   private readonly throttleMs: number;
@@ -59,15 +60,49 @@ export class StreamingCardController {
     return this.reasoningContent;
   }
 
+  /** Last streaming flush failure; cleared by a successful streaming flush. */
+  get lastFlushError(): unknown | null {
+    return this.flushController.lastFlushError;
+  }
+
   /**
-   * Append a token chunk to main streaming response.
+   * Freeze prior prose before a new assistant message, such as after a tool call.
+   * Subsequent message snapshots replace only the text after this boundary.
+   * Calling this without adding text does not insert an empty paragraph.
+   */
+  startAssistantMessage(): void {
+    if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
+      return;
+    }
+    this.assistantMessageBase = this.mainContent;
+  }
+
+  /**
+   * Set the cumulative snapshot for the current assistant message.
+   * Unlike updateContent(), this preserves prose frozen by startAssistantMessage().
+   * Snapshots are authoritative, including corrections to shorter or empty text.
+   */
+  async updateAssistantMessage(text: string): Promise<void> {
+    if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
+      return;
+    }
+    this.state = "streaming";
+    this.mainContent = this.assistantMessageBase && text
+      ? `${this.assistantMessageBase}\n\n${text}`
+      : this.assistantMessageBase || text;
+    await this.flushController.throttledUpdate(this.throttleMs);
+  }
+
+  /**
+   * Append a token chunk to the current message, preserving any explicit boundary.
    */
   async appendToken(token: string): Promise<void> {
     if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
       return;
     }
     this.state = "streaming";
-    this.mainContent += token;
+    const startsMessage = this.assistantMessageBase && this.mainContent === this.assistantMessageBase;
+    this.mainContent += startsMessage && token ? `\n\n${token}` : token;
     await this.flushController.throttledUpdate(this.throttleMs);
   }
 
@@ -84,13 +119,14 @@ export class StreamingCardController {
   }
 
   /**
-   * Replace full main content and trigger throttled update.
+   * Replace full main content, reset any message boundary, and trigger throttled update.
    */
   async updateContent(text: string): Promise<void> {
     if (this.state === "completed" || this.state === "error" || this.state === "aborted") {
       return;
     }
     this.state = "streaming";
+    this.assistantMessageBase = "";
     this.mainContent = text;
     await this.flushController.throttledUpdate(this.throttleMs);
   }

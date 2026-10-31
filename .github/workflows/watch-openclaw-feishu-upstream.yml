@@ -1,4 +1,4 @@
-name: Watch OpenClaw Feishu Upstream
+name: Watch Channel Upstreams
 
 on:
   schedule:
@@ -67,4 +67,4 @@ jobs:
           if [ "$WATCH_DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
-          python scripts/upstream_watch.py "${args[@]}"
+          python scripts/upstream_watch.py --config upstream/targets.json "${args[@]}"

@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-10-31",
+  "hash_algorithm": "sha256",
+  "hash_subject": "Exact retrieved source UTF-8 content or original HTTP document bytes; no line-ending normalization",
+  "scope": "Protocol research provenance only; no platform live acceptance",
+  "sources": [
+    {
+      "repository": "tencent-connect/openclaw-qqbot",
+      "ref": "main",
+      "commit": "89988812442583bf47c34b89f9abf5fd4b85df0b",
+      "commit_date": "2026-10-12T08:44:59Z",
+      "files": [
+        {
+          "path": "package.json",
+          "blob_sha1": "64e8b75f72271646405d3006d7a888732f5a1dd4",
+          "sha256": "1854a1bae6951b90cbd7344792bfb6ab4401700d71af9db4d77fbe89c8e8b0e9",
+          "bytes": 1379
+        },
+        {
+          "path": "src/setup/login.ts",
+          "blob_sha1": "d11b39661854171c5ef7301905794a3c1b97f8f4",
+          "sha256": "169cb4750a7e647894f3f09f01f84c184ca1e429d06e8c0b469b2c8e2f234b4b",
+          "bytes": 6154
+        },
+        {
+          "path": "src/gateway/qqbot-gateway.ts",
+          "blob_sha1": "35c745ea30942e66b4ba542e7955c1972d7e97b4",
+          "sha256": "cb8b9428ad99f10f805fec8aa802e3aa184b00eb8058af445317090a63d83e55",
+          "bytes": 13040
+        },
+        {
+          "path": "src/gateway/event-handlers.ts",
+          "blob_sha1": "723369bb82863ea515dc47419434ad23cd6ea652",
+          "sha256": "ae3e1ac4713242bdff6b6fb29e45befe4d92dc7b453a1f53d43b148bbe302e71",
+          "bytes": 8759
+        },
+        {
+          "path": "src/adapter/webhook.ts",
+          "blob_sha1": "e89aa18abe6721887393ceb84a3047a8cd14edfa",
+          "sha256": "37476942920a84af8f4fd5fb0f357b4c16f9464d0c7401ddb6215f2716d1a46f",
+          "bytes": 9775
+        },
+        {
+          "path": "src/outbound/target.ts",
+          "blob_sha1": "c1b341209eba3a1a63aff58f51960cb324cf0f8a",
+          "sha256": "df80388a0d53e44a9a2b694398fdcba6603bf153d21be89df60324209a7df47b",
+          "bytes": 1953
+        },
+        {
+          "path": "src/outbound/reply-limiter.ts",
+          "blob_sha1": "fdd880e2f9b0659ddfc17b6eb49d05dbd4fc0e67",
+          "sha256": "b5f5b596911a30017fefefd5b9b395df1eb53d12f9bd056ead018753296f5366",
+          "bytes": 3260
+        },
+        {
+          "path": "src/outbound/media-send.ts",
+          "blob_sha1": "c06abf0ee089b244059c45d96fdc61daf8527db3",
+          "sha256": "64751457d93daf6b71015df57811eacc3c51f62d6baa8eed1ac395bc85637d84",
+          "bytes": 11422
+        }
+      ],
+      "source_kind": "git_source",
+      "retrieval": "GitHub connector, exact commit ref",
+      "url": "https://github.com/tencent-connect/openclaw-qqbot",
+      "evidence": {
+        "source_read": true,
+        "local_replay": false,
+        "live": false
+      }
+    },
+    {
+      "repository": "Tencent/openclaw-weixin",
+      "ref": "main",
+      "commit": "874637a0dbc24050f72d1385add4fc6170a2d726",
+      "commit_date": "2026-10-13T03:31:48Z",
+      "files": [
+        {
+          "path": "package.json",
+          "blob_sha1": "343cb9ed876b5d6ced0f963e889c25f897d25ace",
+          "sha256": "89e9e2a5883ccf46cb579e76dccb80c4ce7e619a499352eaf07d1022cf56c813",
+          "bytes": 1922
+        },
+        {
+          "path": "docs/protocol_zh_CN.md",
+          "blob_sha1": "59e5001dcced54052355580223362bfe94922000",
+          "sha256": "774ecb258ec9147d833335711cbb0d51fb40de3cb26113394b2427c191a735a0",
+          "bytes": 17430
+        },
+        {
+          "path": "src/api/types.ts",
+          "blob_sha1": "276e845eea75d0e7f48e3a5d418f93636628481b",
+          "sha256": "9e321e1a79bd7ec385b8e2b9695f1d87507282ff33f9cfdafbe4e33aea5387ac",
+          "bytes": 7546
+        },
+        {
+          "path": "src/api/api.ts",
+          "blob_sha1": "5febfeaa45e1aa5e7c93ae9f00ea876f03c7995e",
+          "sha256": "7a808846a33c70423b4a4a5fcf3c1a45f885d005994218ef5f4db663d4e6e935",
+          "bytes": 22100
+        },
+        {
+          "path": "src/auth/login-qr.ts",
+          "blob_sha1": "002d8afb08e6db2039c34bd75c36dc4a2a6bd707",
+          "sha256": "1347ceff3da2fc0df82aefff684be2c12870778d026b1cbe063226dfa9bea0c4",
+          "bytes": 17029
+        },
+        {
+          "path": "src/messaging/send.ts",
+          "blob_sha1": "0aaea1b2d9751d6b99772f1049de6b366d29f38e",
+          "sha256": "2f33e3e9cccb18ef03620669deb1c415749f6ac3835f4ff24f25847ecb753f4d",
+          "bytes": 11710
+        },
+        {
+          "path": "src/cdn/upload.ts",
+          "blob_sha1": "c355e82ba6ee861b29ed74a85daafa0c81deddb0",
+          "sha256": "81ef18b5f972d29849859cfbbbc0c1be88298750eb4b2e342b2a0c43b7039cba",
+          "bytes": 5616
+        },
+        {
+          "path": "src/monitor/monitor.ts",
+          "blob_sha1": "d60f6514fdd1e6dab4e865ffe466a7245a1492db",
+          "sha256": "a8689853b464cea3bd12932fc97055dbcac2ec1386d1a7a39a81cb8e291f3704",
+          "bytes": 8458
+        }
+      ],
+      "source_kind": "git_source",
+      "retrieval": "GitHub connector, exact commit ref",
+      "url": "https://github.com/Tencent/openclaw-weixin",
+      "evidence": {
+        "source_read": true,
+        "local_replay": false,
+        "live": false
+      }
+    },
+    {
+      "repository": "NousResearch/hermes-agent",
+      "ref": "main",
+      "commit": "f30105a0b4b3d0c1baa6c464189755ccdbc1ac7f",
+      "commit_date": "2026-10-31T01:59:00Z",
+      "files": [
+        {
+          "path": "website/docs/developer-guide/adding-platform-adapters.md",
+          "blob_sha1": "4631713eb36ad2555e009ceb040a79076f847b3f",
+          "sha256": "ed67ee56d3032d4309b49c8045110a46bfecda242d44319ddaec48e739ed23c4",
+          "bytes": 43197
+        },
+        {
+          "path": "gateway/platform_registry.py",
+          "blob_sha1": "81eb059c776762370293b6929f2d4a17ec19a748",
+          "sha256": "8f3175906ff8f8f503f98ff05d82977307096e308d8ea899283cccef2f52e96e",
+          "bytes": 29933
+        },
+        {
+          "path": "gateway/run_adapters.py",
+          "blob_sha1": "80764deda00b53bedad028b1fc940a6f1f9969f6",
+          "sha256": "a6fc01c61f6643e0c98cf943e518f5b79badd19e57723e70345c9ef226921e8b",
+          "bytes": 116514
+        },
+        {
+          "path": "gateway/platforms/base.py",
+          "blob_sha1": "f94913cbbc6c00fb4b6fde514c7bdb6bbfacfe41",
+          "sha256": "5a12e9a56c2c54815b1bd935da5af1d6e6736ba5f785b2ce2b6f4c66e8511a2b",
+          "bytes": 275828
+        }
+      ],
+      "source_kind": "git_source",
+      "retrieval": "GitHub connector, exact commit ref",
+      "url": "https://github.com/NousResearch/hermes-agent",
+      "evidence": {
+        "source_read": true,
+        "local_replay": false,
+        "live": false
+      }
+    },
+    {
+      "source_kind": "official_docs",
+      "id": "telegram-bot-api",
+      "url": "https://core.telegram.org/bots/api",
+      "version_label": "Bot API 10.3",
+      "version_date": "2026-08-24",
+      "retrieval": "HTTPS GET via Python urllib; Firecrawl returned unsupported-site error",
+      "files": [
+        {
+          "url": "https://core.telegram.org/bots/api",
+          "sha256": "1b3b003151a6f36cb55da0eb721b7f67b5cd1d8e175b57ffcc418c1f65904fe9",
+          "bytes": 860229
+        },
+        {
+          "url": "https://core.telegram.org/bots/api.md",
+          "sha256": "f32f03bedfc363c0e8dd595489e7b676666589cd397416fed61aca23be4e272c",
+          "bytes": 39690
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/methods/getupdates.md",
+          "sha256": "6e91accc8fd458c917dc0ede42e84e26f0e75e0cbd505a50ea03ba7978df3879",
+          "bytes": 2077
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/methods/setwebhook.md",
+          "sha256": "ca8333d1e8204f66b32cf58c6d1e43015a2a09d36d153000c3e5d2eaf2e4ee1f",
+          "bytes": 3238
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/methods/sendmessage.md",
+          "sha256": "c0328143f016e1dfe459eb48197c9df2f02e9e892195152eaa2b9870c7bfdc79",
+          "bytes": 3375
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/methods/getfile.md",
+          "sha256": "4dbe469751358498a55d7705379907f18a1da296b18e27b6f71fdf61eb378ef2",
+          "bytes": 938
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/types/replyparameters.md",
+          "sha256": "e285a1218d15dd5038f37b7c0f78772dbbab354d4585f73b06ad560ce39dca89",
+          "bytes": 2467
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/types/responseparameters.md",
+          "sha256": "44db8ddcd2a44d807fd455d9164befd7af0a10a85c6c2c49c88050e94a13b66b",
+          "bytes": 754
+        },
+        {
+          "url": "https://core.telegram.org/bots/api-changelog.md",
+          "sha256": "e1f38f9e1173db1f43040360ac347a1386957ef4b6f2c2f94ed82cfc46c7b681",
+          "bytes": 177335
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/methods/editmessagetext.md",
+          "bytes": 2218,
+          "sha256": "9b1277346a8f3dfd3fdf55bf3d866fb779d70b9c2911b0d5da1f28d517d0219d"
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/methods/answercallbackquery.md",
+          "bytes": 1711,
+          "sha256": "aff754557944799d5a9e0aea0a606d3cf8159282df80afeda97b4edf1bf3f679"
+        },
+        {
+          "url": "https://core.telegram.org/bots/api/methods/sendmessagedraft.md",
+          "bytes": 1861,
+          "sha256": "dc9213d67c4d556ec5ab0f3bc09ab7c878a16856b451c51c4549d50d0715655b"
+        }
+      ],
+      "evidence": {
+        "source_read": true,
+        "local_replay": false,
+        "live": false
+      }
+    }
+  ],
+  "release_artifacts": [],
+  "package_observations": [
+    {
+      "name": "@tencent-connect/openclaw-qqbot",
+      "version": "2.0.4",
+      "source": "tencent-connect/openclaw-qqbot/package.json",
+      "release_artifact_downloaded": false
+    },
+    {
+      "name": "@tencent-connect/qqbot-connector",
+      "declared_version": "1.2.0",
+      "source": "tencent-connect/openclaw-qqbot/package.json",
+      "release_artifact_downloaded": false
+    },
+    {
+      "name": "@tencent-connect/qqbot-nodejs",
+      "declared_version": "^1.0.4",
+      "source": "tencent-connect/openclaw-qqbot/package.json",
+      "release_artifact_downloaded": false
+    },
+    {
+      "name": "@tencent-weixin/openclaw-weixin",
+      "version": "2.4.10",
+      "source": "Tencent/openclaw-weixin/package.json",
+      "release_artifact_downloaded": false
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -626,3 +627,203 @@ def test_issue_repository_fallback_is_user_fork(monkeypatch: pytest.MonkeyPatch)
 def test_invalid_inspection_limit_is_rejected() -> None:
     with pytest.raises(SystemExit, match="2"):
         upstream_watch.parse_args(["--per-target-limit", "0"])
+
+
+@pytest.fixture
+def configured_targets() -> dict[str, WatchTarget]:
+    return {target.key: target for target in upstream_watch.load_watch_targets(
+        upstream_watch.DEFAULT_CONFIG_FILE
+    )}
+
+
+def routed_detail(
+    *filenames: str, message: str = "fix: update platform delivery"
+) -> dict[str, Any]:
+    return {
+        "sha": "c0ffee0",
+        "commit": {"message": message},
+        "files": [{"filename": filename} for filename in filenames],
+    }
+
+
+@pytest.mark.parametrize(
+    ("target_key", "filename", "platform", "contract"),
+    [
+        ("openclaw-qqbot", "src/gateway.ts", "qq", "delivery"),
+        ("openclaw-weixin", "src/messaging/context.ts", "weixin", "message"),
+        ("openclaw-weixin", "index.ts", "weixin", "adapter"),
+        ("openclaw-core", "extensions/qqbot/src/inbound.ts", "qq", "adapter"),
+        ("openclaw-core", "extensions/weixin/src/inbound.ts", "weixin", "adapter"),
+        ("openclaw-core", "src/telegram/send.ts", "telegram", "adapter"),
+        ("openclaw-core", "extensions/telegram/src/monitor.ts", "telegram", "adapter"),
+        ("openclaw-core", "src/plugin-sdk/channel-streaming.ts", "shared", "delivery"),
+        ("openclaw-core", "package.json", "shared", "dependencies"),
+        ("hermes-agent", "plugins/platforms/telegram/adapter.py", "telegram", "message"),
+        ("hermes-agent", "plugins/platforms/qqbot/adapter.py", "qq", "adapter"),
+        ("hermes-agent", "plugins/platforms/weixin/plugin.yaml", "weixin", "adapter"),
+        ("hermes-agent", "plugins/platforms/feishu/adapter.py", "feishu", "adapter"),
+        ("hermes-agent", "gateway/platforms/telegram.py", "telegram", "delivery"),
+        ("hermes-agent", "gateway/platforms/base.py", "shared", "runtime"),
+        ("hermes-agent", "gateway/platforms/_shared.py", "shared", "message"),
+        ("hermes-agent", "pyproject.toml", "shared", "dependencies"),
+    ],
+)
+def test_configured_platform_and_contract_routes(
+    configured_targets, target_key, filename, platform, contract
+) -> None:
+    target = configured_targets[target_key]
+    assert not upstream_watch.can_skip_commit_detail(target, "fix(telegram): update delivery")
+    candidate = classify_commit(target, routed_detail(filename))
+    assert candidate is not None
+    assert platform in candidate.platforms
+    assert contract in candidate.contracts
+    assert f"platform:{platform}" in candidate.reasons
+    assert f"contract:{contract}" in candidate.reasons
+    assert candidate.escalation == EscalationLevel.P2_NOTICE
+
+
+def test_configured_commit_can_route_to_multiple_platforms(configured_targets) -> None:
+    candidate = classify_commit(configured_targets["openclaw-core"], routed_detail(
+        "extensions/feishu/src/bot.ts", "src/telegram/send.ts"
+    ))
+    assert candidate is not None
+    assert candidate.platforms == ["feishu", "telegram"]
+
+
+@pytest.mark.parametrize(
+    ("target_key", "filename", "platform"),
+    [
+        ("openclaw-weixin", "docs/protocol_zh_CN.md", "weixin"),
+        ("openclaw-core", "docs/channels/telegram.md", "telegram"),
+        ("hermes-agent", "website/docs/user-guide/messaging/telegram.md", "telegram"),
+    ],
+)
+def test_explicit_protocol_docs_are_not_filtered_as_noise(
+    configured_targets, target_key, filename, platform
+) -> None:
+    target = configured_targets[target_key]
+    message = "docs: describe breaking change in platform protocol"
+    assert not upstream_watch.can_skip_commit_detail(target, message)
+    candidate = classify_commit(target, routed_detail(filename, message=message))
+    assert candidate is not None
+    assert candidate.platforms == [platform]
+    assert candidate.contracts == ["protocol"]
+    assert "protocol-doc" in candidate.reasons
+    assert candidate.escalation == EscalationLevel.P2_NOTICE
+
+
+@pytest.mark.parametrize("filename", ["README.md", "docs/development.md", "unrelated/worker.ts"])
+def test_unwatched_docs_and_unrelated_paths_stay_filtered(configured_targets, filename) -> None:
+    assert classify_commit(configured_targets["openclaw-weixin"], routed_detail(filename)) is None
+
+
+def test_configured_test_only_changes_do_not_inherit_runtime_severity(configured_targets) -> None:
+    candidate = classify_commit(configured_targets["openclaw-core"], routed_detail(
+        "extensions/feishu/src/auth.test.ts", "extensions/discord/src/auth.ts",
+        message="test(security): remove obsolete authentication bypass fixtures",
+    ))
+    assert candidate is not None
+    assert candidate.escalation == EscalationLevel.P3_ROUTINE
+    assert "test-only" in candidate.reasons
+
+
+@pytest.fixture
+def minimal_target_config() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "targets": [{
+            "key": "sample", "repo": "owner/repo", "branch": "main", "mode": "selective",
+            "routes": [{"platform": "qq", "contracts": ["message"], "paths": ["src/**"]}],
+        }],
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("repo", "https://github.com/owner/repo", "Invalid repository"),
+        ("branch", "../main", "Invalid branch"),
+        ("mode", "unknown", "Invalid mode"),
+        ("routes", [], "at least one route"),
+        ("key", "../cursor", "lowercase identifier"),
+    ],
+)
+def test_invalid_target_config_is_rejected(
+    tmp_path, minimal_target_config, field, value, error
+) -> None:
+    minimal_target_config["targets"][0][field] = value
+    config_file = tmp_path / "targets.json"
+    config_file.write_text(json.dumps(minimal_target_config))
+    with pytest.raises(ValueError, match=error):
+        upstream_watch.load_watch_targets(config_file)
+
+
+@pytest.mark.parametrize("path", ["../src/**", "/src/**", "src\\**", "src//**", ""])
+def test_config_paths_must_be_repository_relative(tmp_path, minimal_target_config, path) -> None:
+    minimal_target_config["targets"][0]["routes"][0]["paths"] = [path]
+    config_file = tmp_path / "targets.json"
+    config_file.write_text(json.dumps(minimal_target_config))
+    with pytest.raises(ValueError, match="repository-relative glob"):
+        upstream_watch.load_watch_targets(config_file)
+
+
+def test_duplicate_target_keys_cannot_share_a_cursor(tmp_path, minimal_target_config) -> None:
+    minimal_target_config["targets"].append(minimal_target_config["targets"][0])
+    config_file = tmp_path / "targets.json"
+    config_file.write_text(json.dumps(minimal_target_config))
+    with pytest.raises(ValueError, match="Duplicate target key"):
+        upstream_watch.load_watch_targets(config_file)
+
+
+def test_invalid_config_or_unknown_target_fails_before_network(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    def reject_session(**kwargs):
+        pytest.fail("Invalid config must fail before creating an API session")
+
+    monkeypatch.setattr(upstream_watch, "GitHubSession", reject_session)
+    config_file = tmp_path / "targets.json"
+    config_file.write_text('{"version":99,"targets":[]}')
+    assert upstream_watch.main(["--config", str(config_file), "--dry-run"]) == 2
+    assert "Unsupported upstream config version" in capsys.readouterr().err
+    assert upstream_watch.main(["--target", "missing", "--dry-run"]) == 2
+    assert "Unknown target" in capsys.readouterr().err
+
+
+def test_default_config_is_independent_of_working_directory(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    args = upstream_watch.parse_args([])
+    targets = upstream_watch.load_watch_targets(args.config)
+    assert {target.key for target in targets} == {
+        "openclaw-lark", "openclaw-core", "openclaw-qqbot", "openclaw-weixin", "hermes-agent",
+    }
+
+
+def test_configured_dry_run_reuses_legacy_cursor_keys_without_writes(
+    tmp_path, monkeypatch, configured_targets
+) -> None:
+    state_file = tmp_path / "state.json"
+    store = UpstreamStateStore()
+    for key in ("openclaw-lark", "openclaw-core"):
+        store.get_target_state(key).record_commit(f"saved-{key}", "2026-10-01T00:00:00Z")
+    store.save_to_file(str(state_file))
+    original = state_file.read_bytes()
+    calls: dict[str, dict[str, Any]] = {}
+
+    def commits(session, **kwargs):
+        calls[kwargs["repo"]] = kwargs
+        return []
+
+    def reject_request(*args, **kwargs):
+        pytest.fail("Dry-run with mocked history must not write issues or query the API")
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(upstream_watch, "fetch_commits_with_cursor", commits)
+    monkeypatch.setattr(upstream_watch.GitHubSession, "request", reject_request)
+    assert upstream_watch.main(["--dry-run", "--state-file", str(state_file)]) == 0
+    for key in ("openclaw-lark", "openclaw-core"):
+        call = calls[configured_targets[key].repo]
+        assert call["cursor_sha"] == f"saved-{key}"
+        assert call["seen_shas"] == {f"saved-{key}"}
+    assert state_file.read_bytes() == original

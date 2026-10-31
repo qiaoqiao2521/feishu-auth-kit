@@ -1,0 +1,415 @@
+{
+  "version": 1,
+  "targets": [
+    {
+      "key": "openclaw-lark",
+      "repo": "larksuite/openclaw-lark",
+      "branch": "main",
+      "mode": "plugin",
+      "routes": [
+        {
+          "platform": "feishu",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "src/**",
+            "openclaw.plugin.json",
+            "index.ts",
+            "index.test.ts"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "auth"
+          ],
+          "paths": [
+            "src/**auth*",
+            "src/**oauth*",
+            "src/**token*",
+            "src/**scope*",
+            "src/**registration*"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "message",
+            "policy"
+          ],
+          "paths": [
+            "src/messaging/inbound/**",
+            "src/channel/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "delivery",
+            "streaming",
+            "cards"
+          ],
+          "paths": [
+            "src/card/**",
+            "src/messaging/outbound/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "package.json"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "protocol"
+          ],
+          "docs": [
+            "docs/protocol*.md",
+            "docs/auth*.md"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "openclaw-core",
+      "repo": "openclaw/openclaw",
+      "branch": "main",
+      "mode": "core",
+      "routes": [
+        {
+          "platform": "feishu",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "extensions/feishu/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "auth"
+          ],
+          "paths": [
+            "extensions/feishu/**auth*",
+            "extensions/feishu/**token*",
+            "extensions/feishu/**registration*"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "protocol"
+          ],
+          "docs": [
+            "docs/channels/feishu.md"
+          ]
+        },
+        {
+          "platform": "telegram",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "extensions/telegram/**",
+            "src/telegram/**"
+          ]
+        },
+        {
+          "platform": "telegram",
+          "contracts": [
+            "auth",
+            "policy"
+          ],
+          "paths": [
+            "extensions/telegram/**auth*",
+            "src/telegram/**auth*",
+            "src/telegram/**access*"
+          ]
+        },
+        {
+          "platform": "telegram",
+          "contracts": [
+            "protocol"
+          ],
+          "docs": [
+            "docs/channels/telegram.md"
+          ]
+        },
+        {
+          "platform": "qq",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "extensions/qqbot/**"
+          ]
+        },
+        {
+          "platform": "weixin",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "extensions/weixin/**",
+            "extensions/wechat/**"
+          ]
+        },
+        {
+          "platform": "shared",
+          "contracts": [
+            "message",
+            "delivery",
+            "runtime"
+          ],
+          "paths": [
+            "src/plugin-sdk/*channel*",
+            "src/plugin-sdk/*card*",
+            "src/plugin-sdk/*interactive*",
+            "src/plugin-sdk/*session-runner*",
+            "src/channels/plugins/contracts/**"
+          ]
+        },
+        {
+          "platform": "shared",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "package.json",
+            "pnpm-lock.yaml"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "openclaw-qqbot",
+      "repo": "tencent-connect/openclaw-qqbot",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "qq",
+          "contracts": [
+            "adapter",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "src/**",
+            "openclaw.plugin.json",
+            "index.ts",
+            "index.test.ts"
+          ]
+        },
+        {
+          "platform": "qq",
+          "contracts": [
+            "auth"
+          ],
+          "paths": [
+            "src/**auth*",
+            "src/**token*",
+            "src/**credential*"
+          ]
+        },
+        {
+          "platform": "qq",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "package.json"
+          ]
+        },
+        {
+          "platform": "qq",
+          "contracts": [
+            "protocol"
+          ],
+          "docs": [
+            "docs/protocol_zh_CN.md",
+            "docs/protocol*.md"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "openclaw-weixin",
+      "repo": "Tencent/openclaw-weixin",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "weixin",
+          "contracts": [
+            "adapter",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "src/**",
+            "openclaw.plugin.json",
+            "index.ts",
+            "index.test.ts"
+          ]
+        },
+        {
+          "platform": "weixin",
+          "contracts": [
+            "auth"
+          ],
+          "paths": [
+            "src/**auth*",
+            "src/**token*",
+            "src/**credential*"
+          ]
+        },
+        {
+          "platform": "weixin",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "package.json"
+          ]
+        },
+        {
+          "platform": "weixin",
+          "contracts": [
+            "protocol"
+          ],
+          "docs": [
+            "docs/protocol_zh_CN.md",
+            "docs/protocol*.md"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "hermes-agent",
+      "repo": "NousResearch/hermes-agent",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "feishu",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "plugins/platforms/*feishu*",
+            "plugins/platforms/*lark*",
+            "gateway/platforms/*feishu*",
+            "gateway/platforms/*lark*"
+          ]
+        },
+        {
+          "platform": "telegram",
+          "contracts": [
+            "adapter",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "plugins/platforms/*telegram*",
+            "gateway/platforms/*telegram*"
+          ]
+        },
+        {
+          "platform": "qq",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "plugins/platforms/*qq*",
+            "gateway/platforms/*qq*"
+          ]
+        },
+        {
+          "platform": "weixin",
+          "contracts": [
+            "adapter"
+          ],
+          "paths": [
+            "plugins/platforms/*weixin*",
+            "plugins/platforms/*wechat*",
+            "gateway/platforms/*weixin*",
+            "gateway/platforms/*wechat*"
+          ]
+        },
+        {
+          "platform": "shared",
+          "contracts": [
+            "message",
+            "delivery",
+            "runtime"
+          ],
+          "paths": [
+            "plugins/platforms/base.py",
+            "plugins/platforms/__init__.py",
+            "gateway/platforms/base.py",
+            "gateway/platforms/__init__.py",
+            "gateway/platforms/base/**",
+            "gateway/platforms/shared/**",
+            "gateway/platforms/base_*.py",
+            "gateway/platforms/_shared.py",
+            "gateway/platforms/event.py",
+            "gateway/platforms/send_targets.py",
+            "gateway/platforms/shared_ingress.py",
+            "gateway/platforms/webhook*.py"
+          ]
+        },
+        {
+          "platform": "shared",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "pyproject.toml",
+            "requirements*.txt",
+            "uv.lock"
+          ]
+        },
+        {
+          "platform": "telegram",
+          "contracts": [
+            "protocol"
+          ],
+          "docs": [
+            "docs/*telegram*",
+            "docs/**telegram*",
+            "website/docs/**telegram*"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "protocol"
+          ],
+          "docs": [
+            "docs/*feishu*",
+            "docs/**feishu*",
+            "website/docs/**feishu*"
+          ]
+        },
+        {
+          "platform": "shared",
+          "contracts": [
+            "auth",
+            "policy"
+          ],
+          "paths": [
+            "gateway/platforms/access_policy_mixin.py"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "feishu-auth-kit",
   "version": "0.1.0",
-  "description": "Standalone Feishu/Lark native agent kit for onboarding, OAuth, inbound context, CardKit snapshots, and runner seams.",
+  "description": "Feishu-compatible channel kit with shared message and runner contracts and Telegram Bot API primitives.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,15 +10,21 @@
   },
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./feishu": { "types": "./dist/feishu.d.ts", "import": "./dist/feishu.js" },
+    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
+    "./telegram": { "types": "./dist/telegram/index.d.ts", "import": "./dist/telegram/index.js" },
+    "./telegram-host": { "types": "./dist/telegram/polling-host.d.ts", "import": "./dist/telegram/polling-host.js" }
   },
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly",
     "dev": "vitest",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:package": "node scripts/check-package.mjs",
+    "telegram:echo": "node examples/telegram-echo.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

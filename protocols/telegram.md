@@ -18,7 +18,7 @@
 
 `allowed_updates` 省略时复用此前设置；它不改变调用前已创建的更新，解析器仍需拒绝或显式忽略不支持的类型。平台的 `update_id` 可用于去重，但不能把它当成发送幂等键。
 
-[setWebhook](https://core.telegram.org/bots/api/methods/setwebhook.md) 可设置 `secret_token`，请求携带 `X-Telegram-Bot-Api-Secret-Token`。将来如增加 webhook host，需要独立验收 secret 校验、持久化接收后的 HTTP 应答与重复投递；当前 polling host 不提供该能力。
+[setWebhook](https://core.telegram.org/bots/api/methods/setwebhook.md) 可设置 `secret_token`，请求携带 `X-Telegram-Bot-Api-Secret-Token`。当前试点直接使用现成 adapter 的 webhook 校验；本地测试覆盖缺失 / 错误 secret，不包含注册真实 webhook 或持久收件箱。
 
 ## 回复上下文与媒体边界
 
@@ -35,9 +35,16 @@
 
 媒体有三种路径：复用当前 bot 的 `file_id`、平台从 URL 获取、multipart 上传。具体媒体限制随方法而异；官方当前 [getFile](https://core.telegram.org/bots/api/methods/getfile.md) 对云端下载列出 20 MB 上限，下载 URL 至少有效 1 小时。URL 含 token，不能作为普通可分享媒体 URL。local Bot API server 有不同限制，当前研究不把它与公共云端 API 混为同一部署。
 
-本轮客户端提供 getMe、getUpdates、文本 send / reply / [edit](https://core.telegram.org/bots/api/methods/editmessagetext.md)、[callback query 应答](https://core.telegram.org/bots/api/methods/answercallbackquery.md)，以及需显式启用的 [sendMessageDraft](https://core.telegram.org/bots/api/methods/sendmessagedraft.md) 预览。归一化器保留文本 / caption 和不透明的 file_id 附件引用；它不下载附件，也没有媒体发送接口。官方 draft 面向 private chat，是临时 30 秒预览，成功只返回 true；最终仍须 sendMessage 才持久化，不能替代最终消息回执。
+本轮撤下自建 Bot API 客户端，改为直接使用 `@chat-adapter/telegram@4.43.0`。
+该发布版本由 Vercel 维护，已有消息归一化、媒体、卡片按钮、callback 应答、编辑与流式能力。
+实际离线测试证明标准 Request 可经过 Chat webhook 到 handler，再由 adapter 发送回复；
+也覆盖按钮渲染与回调、附件惰性引用、topic 与 quote，以及原生 rich draft 到单独最终发送。
+未执行真实附件下载或账号连接。直接从上游 `Message.toJSON()` 序列化仍会带 raw / metadata，
+模型边界需选取字段。新在线文档中的 `longMessages: 'split'` 尚未进入该发布版本。
 
-这些方法不代表已实现完整交互按钮流程、business / ephemeral / direct-message topics 或所有 Telegram update 类型。新增能力必须更新 capability 声明、fixture 和平台验收记录。
+SDK 内存在能力不等于本 kit 已验收所有 business / ephemeral / direct-message topics 或所有 update 类型。
+普通网络发送失败不自动重发的行为已回放，但 polling 可能重跑失败 handler，webhook 又在业务完成前去重。
+当前示例明确 webhook-only 和内存状态，不宣称具备持久投递恢复；完整取舍见 [迁移说明](../docs/channel-kit-migration.md)。
 
 ## 后续真实验收
 

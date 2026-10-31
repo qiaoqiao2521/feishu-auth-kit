@@ -2,13 +2,16 @@
 
 核对日期：2026-10-31。源码版本和内容 SHA-256 见 [sources.lock.json](../upstream/sources.lock.json)。
 
-本目录记录可用于后续实现的协议边界。源码中存在某个字段、SDK 方法或示例，不代表本 kit 已实现该能力，也不代表平台服务端已接受过该请求。
+本目录保留官方协议比较基线。当前选型与发布 adapter 的差异见
+[复用矩阵](reuse-matrix.md)、[飞书职责对照](feishu-reuse.md) 和
+[reuse-sources.lock.json](../upstream/reuse-sources.lock.json)。优先复用现成实现，
+仅为缺口增加薄层或上游补丁；源码字段与构造成功不代表真实平台验收。
 
 | 渠道 / 宿主 | 本轮证据 | 本轮实现范围 |
 | --- | --- | --- |
-| [Telegram](telegram.md) | 官方 Bot API 10.3 文档及方法页 | 文本收发 / 编辑、callback 应答、显式启用的 draft 预览、入站归一化与本地 polling host；验收范围见迁移说明 |
-| [QQ](qq.md) | 腾讯官方插件固定提交的源码 | 协议研究；未实现 QQ adapter |
-| [微信](weixin.md) | 腾讯官方插件的协议文档、API 类型、登录与发送源码 | 协议研究；未实现微信 adapter |
+| [Telegram](telegram.md) | 官方 Bot API 10.3 文档及方法页 | 复用 Vercel adapter 4.43.0，已完成模拟 webhook、按钮与最终投递语义测试 |
+| [QQ](qq.md) | 腾讯官方插件固定提交的源码 | 对照社区 adapter 0.1.1；仅导入、构造和类型兼容通过 |
+| [微信](weixin.md) | 腾讯官方插件的协议文档、API 类型、登录与发送源码 | 对照社区 adapter 0.1.4；仅导入、构造和类型兼容通过 |
 | [Hermes](hermes.md) | 官方平台插件指南与注册 / adapter 源码 | 宿主接入研究；未实现 Hermes adapter |
 
 证据分为三层：

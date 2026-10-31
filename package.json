@@ -1,7 +1,7 @@
 {
   "name": "feishu-auth-kit",
   "version": "0.1.0",
-  "description": "Feishu-compatible channel kit with shared message and runner contracts and Telegram Bot API primitives.",
+  "description": "Feishu compatibility kit evaluating reusable Chat SDK adapters for multi-platform agent access.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,22 +12,24 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./feishu": { "types": "./dist/feishu.d.ts", "import": "./dist/feishu.js" },
-    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
-    "./telegram": { "types": "./dist/telegram/index.d.ts", "import": "./dist/telegram/index.js" },
-    "./telegram-host": { "types": "./dist/telegram/polling-host.d.ts", "import": "./dist/telegram/polling-host.js" }
+    }
   },
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly",
     "dev": "vitest",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:package": "node scripts/check-package.mjs",
-    "telegram:echo": "node examples/telegram-echo.mjs"
+    "typecheck:chat": "tsc --project tsconfig.chat-sdk.json",
+    "test:package": "node scripts/check-package.mjs"
   },
   "devDependencies": {
+    "@agentor/chat-qq": "0.1.1",
+    "@chat-adapter/state-memory": "4.43.0",
+    "@chat-adapter/telegram": "4.43.0",
+    "@larksuite/vercel-chat-adapter": "0.3.0",
     "@types/node": "^26.5.1",
+    "chat": "4.43.0",
+    "chat-adapter-weixin": "0.1.4",
     "tsup": "^8.5.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"

@@ -9,9 +9,4 @@ build/
 *.egg-info/
 node_modules/
 .upstream-watch/
-*.sqlite
-*.sqlite-journal
-*.sqlite-wal
-*.sqlite-shm
-telegram-grants.local.json
 

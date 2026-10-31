@@ -2,57 +2,53 @@
 
 中文 | [English Summary](#english-summary)
 
-本仓库正兼容演进为多平台聊天接入工具库。包名、Python 导入、飞书 CLI 和凭证位置
-继续保留；当前通过子路径拆分代码边界，后续再迁移到独立 packages，避免维护两份实现。
+本仓库正在评估以现成 Chat SDK 和平台 adapter 组合出多平台 Agent 接入。
+维护范围是配置、授权、账户隔离、模型输入边界、版本锁定与兼容验收；
+飞书旧包名、Python 导入、CLI 和凭证位置继续保留。
 
-| 入口 | 当前状态 |
+当前优先候选是 [Vercel Chat SDK](https://github.com/vercel/chat)。
+跨平台消息、thread、回复和平台连接优先复用它与已有 adapter，
+本草稿不再新增私有 ChannelCore 或 Telegram Bot API 客户端。
+
+| 层次 | 当前处理 |
 | --- | --- |
-| `feishu-auth-kit` / `feishu-auth-kit/feishu` | 现有飞书 API，兼容原 schema 和 runner 接口 |
-| `feishu-auth-kit/core` | 平台无关的消息、身份授权、会话键、能力、投递结果和 runner 契约 |
-| `feishu-auth-kit/telegram` | Bot API 文本收发、编辑、callback 应答、可选临时 draft，以及入站归一化 |
-| `feishu-auth-kit/telegram-host` | 本地 SQLite 持久化回显 / runner 宿主，需要 Node.js 24+；默认拒绝未授权发送者 |
-| QQ / 微信 iLink | 已锁定官方实现与协议依据；适配器和账号验收待实现 |
-| OpenClaw / Hermes 薄适配 | 已研究宿主边界；本轮未提供可安装适配器 |
+| 统一接口 | 已固定 `chat` / Telegram / memory state `4.43.0`，直接组合与离线行为测试通过 |
+| 飞书 | 旧 API 保留；已审 `@larksuite/vercel-chat-adapter@0.3.0` 与官方 Channel SDK，完成导入、构造和类型兼容检查 |
+| QQ Bot | 已审 `@agentor/chat-qq@0.1.1`，完成构造和类型检查；callback 缺签名边界待修复与验收 |
+| 微信 iLink | 已审 `chat-adapter-weixin@0.1.4`，完成构造和类型检查；与腾讯当前登录和 ID 类型的差异待处理 |
+| 企业微信 | 独立评估三种模式，已审发布包；未纳入运行试点 |
+| Satori | 跨语言独立服务的备选，暂未引入；Koishi / NoneBot 等框架也未安装 |
 
-平台身份按 `platform + accountId` 划分；会话键还包括会话、线程和发送者，
-不会自动关联同一个人的不同平台账号。原始事件、callback data 和后续平台回复 token
-留在 transport 的私有 envelope 中，不进入通用消息的模型序列化。
+这些候选是开发评估依赖，尚未成为旧飞书生产入口的必需依赖。
+除了 Telegram 的模拟 webhook 往返，其余平台的“可导入 / 可构造”不代表已接通。
 
-Telegram 宿主在启动时核对 bot ID，按显式授权调用 runner，并在发送前持久化意图。
-超时或进程中断后的投递保留为 `unknown`；执行中断则为 `execution_unknown`，
-重启不自动重发或重新运行。临时 draft 成功不代表最终消息已投递。
-本轮只有离线回放通过，没有真实账号收发验收。
-
-### Telegram 最小回显宿主
-
-先在本机环境或凭据管理器设置 `TELEGRAM_BOT_TOKEN`，不要写入仓库。
-下列示例配置中的 bot、聊天和发送者 ID 必须替换为实际授权测试账号：
+### 运行现成 SDK 的离线验证
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm test
+pnpm typecheck
+pnpm typecheck:chat
 pnpm build
-cp examples/telegram-grants.example.json telegram-grants.local.json
-# 编辑 telegram-grants.local.json，逐项填写授权身份和会话。
-export TELEGRAM_BOT_ID=123456789
-export TELEGRAM_GRANTS_FILE="$PWD/telegram-grants.local.json"
-pnpm telegram:echo
+pnpm test:package
 ```
 
-默认使用 `EchoRunner`；只有本机显式设置 `CHANNEL_KIT_RUNNER=codex` 才启动现有
-Codex runner。这个宿主不下载或发送媒体，不自动重试失败发送，不切换现有 webhook。
-超长回复（超过 4096 字符）记录为发送前失败，尚不自动拆分。
-状态默认保存在 `XDG_STATE_HOME/channel-kit/telegram-<bot-id>.sqlite`，
-未配置 XDG 时使用 `~/.local/state/channel-kit/`；可通过 `TELEGRAM_STATE_FILE` 覆盖。
-状态库仅保存 ID、投递状态与游标，限本机单 consumer；不是长期聊天记忆或分布式队列。
-停止信号阻止后续投递，但不会强制终止已经启动的同步 runner。
+[组合示例](examples/chat-sdk/telegram.mjs) 直接使用上游 `Chat`、
+`createTelegramAdapter` 和 `createMemoryState`，由宿主绑定标准 Request handler。
+示例强制 webhook secret、显式 user / chat / topic 授权、每个 bot 独立 state，
+并仅将选出的文字与身份字段交给响应函数。它不启动轮询、注册 webhook 或自动部署服务。
 
-详细边界见 [迁移说明](docs/channel-kit-migration.md)；
-协议依据见 [protocols](protocols/README.md) 和 [来源锁定](upstream/sources.lock.json)。
-上游追踪器现在从 [targets.json](upstream/targets.json) 读取五个仓库的
-平台 / 契约 / 文档路径，保留六小时周期和旧飞书游标键。
-它监控 GitHub 提交；Telegram 官网文档更新需重新核对并刷新来源锁定。
+该示例使用内存状态，未实现持久投递账本；SDK 的去重、排队或重连均不代表 exactly-once。
+生产接入仍需核对未知投递、持久状态命名空间、敏感原生标识和真实账号行为。
+不应将 SDK Message / raw / 上游异常对象直接送给模型或写入日志。
 
-以下保留飞书能力与现有使用说明。
+评估结论与验收层级见 [迁移说明](docs/channel-kit-migration.md)、
+[复用矩阵](protocols/reuse-matrix.md) 和 [飞书职责对照](protocols/feishu-reuse.md)。
+[复用来源锁定](upstream/reuse-sources.lock.json) 记录确切版本、源码及发布包哈希。
+[上游配置](upstream/targets.json) 现跟踪统一接口、官方通道 SDK 与已核实社区 adapter，
+保留六小时周期和原飞书游标键；GitHub watcher 不代替 registry / 官网资料的版本核对。
+
+以下保留飞书现有能力与使用说明。
 
 `feishu-auth-kit` 是从 `ControlMesh` 抽取出来的飞书第一方模块仓库，负责认证、
 入站消息上下文、runner seam、CardKit 单卡快照，以及
@@ -615,11 +611,11 @@ uv run pytest -q
 
 ## English Summary
 
-The repository is evolving into a channel kit while retaining the existing
-Feishu package, Python API and CLI. New `/core`, `/telegram` and optional
-`/telegram-host` exports provide shared contracts and a locally replay-tested
-Telegram Bot API path. QQ, Weixin iLink and host plugin adapters remain research
-and follow-up work. No live platform acceptance is claimed.
+The repository evaluates existing Chat SDK adapters while retaining the Feishu
+package, Python API and CLI. The draft uses direct upstream composition and
+offline compatibility tests; it does not add a private channel protocol or Bot
+API implementation. Telegram has mocked webhook coverage; the other candidates
+have source, package and construction checks only. No live acceptance is claimed.
 
 `feishu-auth-kit` is the extracted first-party Feishu native agent module from
 `ControlMesh`. It owns auth/onboarding primitives, inbound message

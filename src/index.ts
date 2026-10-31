@@ -8,7 +8,6 @@ export * from './device-flow.js';
 export * from './app-registration.js';
 export * from './probe.js';
 export * from './message-context.js';
-export * from './feishu-message-adapter.js';
 export * from './agent-runtime.js';
 export * from './cardkit.js';
 export * from './runtime-cards.js';

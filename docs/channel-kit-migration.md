@@ -1,55 +1,80 @@
-# Channel kit 迁移：第一阶段范围
+# Channel kit：复用优先的迁移决定
 
-本轮将飞书 kit 中可复用的消息与运行时契约提取为渠道无关的 core，并以 Telegram 文本轮询作为首个新渠道试点。已有飞书 root API 和 Python 包保持兼容；暂不拆成重复实现的多个发布包。
+## 当前决定
 
-## 模块边界
+先采用 `vercel/chat` 的发布版作为可嵌入 TypeScript 统一接口试点，组合现成平台
+adapter；独立跨语言服务需要时再评估 Satori。旧飞书 API、CLI、Python 导入与
+凭证位置保持兼容，待官方 Channel SDK 功能对照和账号验收后再逐项委托。
 
-| 入口 / 模块 | 第一阶段职责 |
-| --- | --- |
-| `feishu-auth-kit` | 现有飞书 API 与兼容入口 |
-| `feishu-auth-kit/core` | 标准化 ChannelMessage / ChannelEnvelope、AuthorizationGrant、能力与运行结果、runner 契约 |
-| `feishu-auth-kit/telegram` | Telegram 文本收发 / 编辑、callback 应答、显式 draft 预览和入站归一化 |
-| `feishu-auth-kit/telegram-host` | 本机单 consumer 的持久化 polling host |
-| `examples/telegram-echo.mjs` | 默认 EchoRunner 的离线友好试点；Codex runner 需显式启用 |
-| `protocols/` 与 `upstream/sources.lock.json` | 平台协议研究、固定来源与证据边界 |
+本草稿已撤下尚未合并的 `src/core`、自建 Telegram HTTP / 归一化 / SQLite polling
+host，以及相应公开子路径。没有发布这些实验 API，也不新增另一个长期维护的通信层。
+已有飞书运行时恢复为主分支实现；原授权、continuation / retry artifact 先作为兼容增量保留。
 
-Telegram host 使用 Node.js 24 的内置 `node:sqlite`；飞书 root 不导入该 host。下游只用飞书能力时，不需要为此启用 SQLite host。包目录拆分留给后续迁移，当前 subpath exports 是代码边界。
+## 已经用真实依赖证明什么
 
-## 第一阶段能力与限制
+| 候选 | 固定版本 | 本地证明 | 未证明 |
+| --- | --- | --- | --- |
+| `chat`、`@chat-adapter/telegram`、`@chat-adapter/state-memory` | `4.43.0` | 安装、类型、初始化模拟、webhook→SDK Message→handler→SDK post、按钮回调、草稿与最终发送 | 真实 bot、持久恢复与生产交付 |
+| `@larksuite/vercel-chat-adapter` | `0.3.0` | 实际发布包审阅、导入、无连接构造、Chat 类型兼容 | 应用登录、WS、卡片和真实收发 |
+| `@agentor/chat-qq` | `0.1.1` | 同上；构造不开 WS、不取 token | callback 缺签名修复、重连、真实应用 |
+| `chat-adapter-weixin` | `0.1.4` | 同上；关闭 polling，不扫码 | 当前 iLink 协议差异、上下文 / 媒体与真实账号 |
+| `@agentor/chat-wecom` | `0.1.3` | 发布包与源码审阅 | 本地运行、任一模式的真实接入 |
 
-本轮 core 不管理平台凭证、网络连接、agent 模型选择或工具权限。平台 transport 负责取得可验证的入站身份，宿主提供按平台、账户、bot、聊天、发送者及适用 thread 限定的授权。标准化事件本身不能授予权限。
+以上依赖仅固定在开发评估依赖与 lockfile 中；旧生产入口不导入它们。
+准确的维护主体、来源提交、发布包 integrity / SHA-256 及缺口见
+[复用矩阵](../protocols/reuse-matrix.md) 和 [复用锁文件](../upstream/reuse-sources.lock.json)。
+包版本相同、目录收录、可构造、符合 peer range，都不等于账号接通或成熟度保证。
 
-Telegram host 的目标是：默认拒绝未授权消息，核对 `getMe` 的 bot 身份，先持久化入站 receipt / 发送 intent，再推进处理状态与游标。持久化 store 只支持本机单 consumer；它不是多机分布式队列。
+## 需要维护的增量
 
-网络请求已经开始但未取得可靠结果时，状态必须保留为未知，重启不自动重发。用户或运维需要依据平台回执核对结果；不会把超时解释为“肯定没发出去”。这提供可恢复记录，不构成 exactly-once 平台交付保证。
+- 配置与业务授权：SDK 的收包能力不授予启动 Agent 的权限。试点为每个 bot 创建
+  独立 Chat / state，必须提供精确 user / chat 授权，可限定 topic。
+- 模型输入：上游 `Message.toJSON()` 含 raw、附件 URL / fetchMetadata；显式选取
+  text、公开身份和引用字段，不把 SDK 对象整体序列化。企业微信部分 thread ID 含密钥，
+  将来不能把所有上游 thread ID 一律当成公开标识。
+- 状态命名空间：memory 无 namespace 参数且跨进程丢失。生产后端应复用 SDK 的
+  state adapter，并隔离 account namespace；不把多账号放进同一个无隔离状态空间。
+- 执行与投递记录：SDK 去重与锁不是业务发送账本。普通 Telegram 网络失败不会在
+  adapter 内重发，但 polling 可重跑失败 handler；未知发送结果必须保留证据再决定动作。
+- 平台能力与补丁：QQ callback 缺签名边界、社区微信旧登录 / uint64 类型等有证据的
+  差异优先给既有 adapter 补丁与回归，不复制另一套底层。
 
-| 渠道 / 集成 | 本轮交付 | 尚未完成 |
-| --- | --- | --- |
-| 飞书 | 现有 API 通过兼容入口继续使用 | 新 host 与飞书真实收发验收 |
-| Telegram | 文本收发 / 编辑、callback 应答、可选 draft 预览、归一化、持久化 polling host、本地回放 | 真实 bot 登录 / 收发验收，媒体下载 / 发送与 webhook host |
-| QQ | 官方来源锁定与协议研究 | adapter、凭证管理、连接、回复和媒体验收 |
-| 微信 | 官方来源锁定与协议研究 | adapter、扫码、游标、context token、加密媒体验收 |
-| OpenClaw / Hermes | 宿主契约研究与薄 adapter 方向 | 可安装 adapter 与宿主内端到端验收 |
+## 试点的具体选择
 
-本轮不将 media、card、edit、typing、reaction 等平台专有能力强行映射成所有渠道共有能力；没有实现的操作应按 capability 拒绝。Telegram 归一化器只保留 file_id 附件引用，不执行下载；draft 只作预览，最终文本仍需独立发送并保存结果。
+[Telegram 示例](../examples/chat-sdk/telegram.mjs) 直接组合 SDK，使用 webhook-only、
+强制 secret、独立 memory state、无状态 concurrent echo 与选取后的模型输入。
+示例不安装 HTTP server，不切换 bot webhook，不注册 callback Agent 工具，也不启动
+外部 runner。绑定真实服务、凭据注入和持久后端属于后续授权账号验收。
 
-## 迁移步骤
+`concurrency: 'queue'` 会合并中间消息到 `context.skipped`，不是逐条 FIFO；默认 drop
+也可能丢弃并发消息，因此试点明确选择无状态 concurrent。将来串行 Agent 需要明确
+处理中间消息和取消的语义后再选上游并发策略。
 
-1. 现有飞书调用方继续使用 root 入口；需要跨渠道 runner 时改为依赖 core 的标准化 envelope 与运行结果。
-2. Telegram 调用方使用独立 client / host subpath，显式配置目标账户、bot 身份、授权范围和持久化目录。试点先使用 EchoRunner。
-3. 根据 runner 显式配置模型或外部执行器；平台消息或原始 payload 不能决定启用 Codex、修改授权或切换账户。
-4. 扩展新渠道前先锁定官方资料，补齐协议 fixture 与能力矩阵，再实现 transport / host。QQ 和微信目前停留在来源研究阶段。
-5. 发布包物理拆分时保留 root 和 subpath 的兼容测试，避免出现两套 core 实现或仅用于占位的 adapter。
+核心 dedupe 在 handler 成功前写入，失败后也保留到 TTL；Telegram webhook 又有
+独立的 update 去重。模拟测试对核心 TTL 的证明不能解释为 webhook 重投一定重执行。
+内存 state 不提供跨进程恢复，也没有 exactly-once 保证。
 
-## 验收证据
+## 下一轮验收停点
 
-本 PR 的验收上限是离线：标准化 fixture、授权 / 账户 / 会话隔离、模拟 HTTP、本地 SQLite 崩溃恢复与旧 API 回归。准确命令与通过数量以本 PR 验证记录为准；文档不预先宣称未运行的测试通过。
+1. 在受控 Telegram bot 上验收现成 adapter 的 webhook、授权、topic 回复、按钮、
+   最终发送失败与未知状态，接入持久 StateAdapter 和业务投递记录后再谈生产闭环。
+2. 飞书优先委托官方 Channel SDK / Chat adapter；为旧返回 schema、owner policy、
+   app+user token 命名空间和 continuation 保存兼容测试。
+3. QQ 与微信先修已识别 adapter 缺口，做官方样本回放，再分别进行账号、重连、
+   上下文与媒体验收。企业微信三种模式单独记录。
+4. OpenClaw / Hermes 只做薄宿主适配，锁定版本；Satori 为独立服务对照，不把多套
+   框架的路由、调度与插件系统装入本仓。
 
-本轮已通过 TypeScript 240 项测试、Python 185 项测试、类型检查、双端构建与
-Python Ruff 检查；新增打包入口 smoke 检查确认五个公开入口可加载，
-包括可选的 `node:sqlite` host。Actionlint 与 Zizmor 离线审计通过。
-新增 CI 对 Node.js 24 和 Python 3.10 / 3.12 运行库回归；CI 结果以对应 PR 为准。
+本轮未进行扫码、真实网络收发、部署或外部 Agent 执行。验证数量与 CI 结果见 PR；
+旧的协议锁文件继续作为腾讯官方源码比较基线，不能替代实际发布 adapter 的版本证据。
 
-[协议目录](../protocols/README.md) 区分文档观察、本地回放和真实平台验收。[锁文件](../upstream/sources.lock.json) 固定本轮实际读取的 20 个 GitHub 源文件和 12 个 Telegram 官方文档快照。未下载 npm 发布包，`release_artifacts` 为空；声明的包版本不是已验证安装包。
+## 本地验证记录
 
-本轮没有可用于真实平台测试的凭证，没有执行扫码、发消息、部署 webhook 或运行外部 agent 的线上验收。下一阶段先在授权测试账户中完成一个受控文本往返，再验证重启 / 拒绝 / 未知发送结果；媒体、QQ、微信和宿主薄 adapter 分别设置验收记录。
+Node 24 / Python 3.12 下通过：`pnpm install --frozen-lockfile`、`pnpm test`
+（161 项，其中 20 项针对真实 Chat SDK / 候选构造 / 薄组合语义）、
+`pnpm typecheck`、`pnpm typecheck:chat`、`pnpm build`、`pnpm test:package`；
+Python 203 项测试、Ruff 与 wheel / sdist 构建；Actionlint、Zizmor 离线审计及补丁检查。
+`typecheck:chat` 对实际候选测试单独执行 TypeScript 检查，不将 Vitest 转译误当作类型通过。
+
+候选依赖带入的 protobufjs postinstall 只输出依赖版本警告，不生成运行文件；本轮明确
+禁用该 hook，并以完整安装和真实 adapter 导入验证发布 JS 可用。esbuild 保持原有构建许可。

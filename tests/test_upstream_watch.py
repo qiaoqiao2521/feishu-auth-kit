@@ -666,6 +666,15 @@ def routed_detail(
         ("hermes-agent", "gateway/platforms/base.py", "shared", "runtime"),
         ("hermes-agent", "gateway/platforms/_shared.py", "shared", "message"),
         ("hermes-agent", "pyproject.toml", "shared", "dependencies"),
+        ("chat-sdk", "packages/chat/src/types.ts", "shared", "interface"),
+        ("chat-sdk", "packages/adapter-telegram/src/index.ts", "telegram", "adapter"),
+        ("lark-channel-node", "src/registration.ts", "feishu", "onboarding"),
+        ("lark-channel-node", "src/outbound/streaming/card-stream.ts", "feishu", "streaming"),
+        ("lark-channel-python", "lark_channel/channel/auth/uat_runner.py", "feishu", "auth"),
+        ("lark-node-sdk", "scene/registration/index.ts", "feishu", "onboarding"),
+        ("agentor-adapters", "packages/chat-qq/src/adapters/bot.ts", "qq", "adapter"),
+        ("agentor-adapters", "packages/chat-wecom/src/adapters/app.ts", "wecom", "adapter"),
+        ("chat-adapter-weixin", "src/index.ts", "weixin", "adapter"),
     ],
 )
 def test_configured_platform_and_contract_routes(
@@ -710,6 +719,41 @@ def test_explicit_protocol_docs_are_not_filtered_as_noise(
     assert candidate.contracts == ["protocol"]
     assert "protocol-doc" in candidate.reasons
     assert candidate.escalation == EscalationLevel.P2_NOTICE
+
+
+@pytest.mark.parametrize(
+    ("target_key", "filename", "platform"),
+    [
+        ("chat-sdk", "apps/docs/content/adapters/vendor-official/lark.mdx", "feishu"),
+        ("chat-sdk", "apps/docs/content/adapters/community/qq.mdx", "qq"),
+        ("lark-channel-python", "docs/reference.md", "feishu"),
+        ("lark-node-sdk", "docs/vercel-chat-adapter/README.md", "feishu"),
+        ("chat-adapter-weixin", "README.md", "weixin"),
+    ],
+)
+def test_reuse_interface_docs_remain_watched(configured_targets, target_key, filename, platform):
+    candidate = classify_commit(configured_targets[target_key], routed_detail(
+        filename, message="docs: update unified adapter capabilities"
+    ))
+    assert candidate is not None
+    assert candidate.platforms == [platform]
+    assert "interface" in candidate.contracts
+    assert candidate.escalation == EscalationLevel.P2_NOTICE
+
+
+@pytest.mark.parametrize(
+    ("target_key", "filename"),
+    [
+        ("chat-sdk", "apps/docs/components/site-header.tsx"),
+        ("lark-node-sdk", "code-gen/projects/calendar.ts"),
+        ("lark-channel-python", "lark_channel/api/calendar/v4/service.py"),
+        ("agentor-adapters", "apps/website/src/index.ts"),
+    ],
+)
+def test_reuse_targets_do_not_watch_unrelated_framework_paths(
+    configured_targets, target_key, filename
+):
+    assert classify_commit(configured_targets[target_key], routed_detail(filename)) is None
 
 
 @pytest.mark.parametrize("filename", ["README.md", "docs/development.md", "unrelated/worker.ts"])
@@ -796,6 +840,8 @@ def test_default_config_is_independent_of_working_directory(tmp_path, monkeypatc
     targets = upstream_watch.load_watch_targets(args.config)
     assert {target.key for target in targets} == {
         "openclaw-lark", "openclaw-core", "openclaw-qqbot", "openclaw-weixin", "hermes-agent",
+        "chat-sdk", "lark-channel-node", "lark-channel-python", "lark-node-sdk",
+        "agentor-adapters", "chat-adapter-weixin",
     }
 
 

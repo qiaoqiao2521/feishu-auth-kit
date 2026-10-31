@@ -410,6 +410,385 @@
           ]
         }
       ]
+    },
+    {
+      "key": "chat-sdk",
+      "repo": "vercel/chat",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "shared",
+          "contracts": [
+            "interface",
+            "state",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "packages/chat/src/**"
+          ]
+        },
+        {
+          "platform": "shared",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "packages/chat/package.json"
+          ]
+        },
+        {
+          "platform": "telegram",
+          "contracts": [
+            "adapter",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "packages/adapter-telegram/src/**",
+            "packages/adapter-telegram/package.json"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "interface",
+            "adapter"
+          ],
+          "docs": [
+            "apps/docs/content/adapters/vendor-official/lark.mdx"
+          ]
+        },
+        {
+          "platform": "qq",
+          "contracts": [
+            "interface",
+            "adapter"
+          ],
+          "docs": [
+            "apps/docs/content/adapters/community/qq.mdx"
+          ]
+        },
+        {
+          "platform": "weixin",
+          "contracts": [
+            "interface",
+            "adapter"
+          ],
+          "docs": [
+            "apps/docs/content/adapters/community/weixin.mdx"
+          ]
+        },
+        {
+          "platform": "shared",
+          "contracts": [
+            "interface",
+            "protocol"
+          ],
+          "docs": [
+            "apps/docs/content/docs/adapter-catalog.mdx",
+            "apps/docs/content/docs/platform-adapters.mdx",
+            "apps/docs/content/docs/api/chat.mdx",
+            "apps/docs/content/docs/api/channel.mdx"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "lark-channel-node",
+      "repo": "larksuite/channel-sdk-node",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "feishu",
+          "contracts": [
+            "adapter",
+            "interface"
+          ],
+          "paths": [
+            "src/channel.ts",
+            "src/types.ts",
+            "src/index.ts",
+            "src/internal/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "message"
+          ],
+          "paths": [
+            "src/normalize/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "delivery",
+            "streaming"
+          ],
+          "paths": [
+            "src/outbound/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "policy",
+            "state"
+          ],
+          "paths": [
+            "src/safety/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "auth",
+            "onboarding"
+          ],
+          "paths": [
+            "src/registration.ts"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "package.json"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "protocol",
+            "interface"
+          ],
+          "docs": [
+            "README.md",
+            "README.zh.md"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "lark-channel-python",
+      "repo": "larksuite/channel-sdk-python",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "feishu",
+          "contracts": [
+            "adapter",
+            "interface"
+          ],
+          "paths": [
+            "lark_channel/channel/channel.py",
+            "lark_channel/channel/config.py",
+            "lark_channel/channel/types.py",
+            "lark_channel/channel/__init__.py",
+            "lark_channel/__init__.py"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "message"
+          ],
+          "paths": [
+            "lark_channel/channel/normalize/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "delivery",
+            "streaming"
+          ],
+          "paths": [
+            "lark_channel/channel/outbound/**",
+            "lark_channel/channel/card/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "policy",
+            "state"
+          ],
+          "paths": [
+            "lark_channel/channel/safety/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "auth"
+          ],
+          "paths": [
+            "lark_channel/channel/auth/**",
+            "lark_channel/core/token/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "transport"
+          ],
+          "paths": [
+            "lark_channel/ws/**",
+            "lark_channel/channel/driver.py"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "setup.py",
+            "lark_channel/core/const.py"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "protocol",
+            "interface"
+          ],
+          "docs": [
+            "README.md",
+            "README.zh.md",
+            "docs/reference.md",
+            "docs/quickstart.md",
+            "docs/migration-from-lark-oapi.md",
+            "docs/security.md",
+            "docs/cardkit-streaming.md"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "lark-node-sdk",
+      "repo": "larksuite/node-sdk",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "feishu",
+          "contracts": [
+            "adapter",
+            "interface",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "channel/**"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "auth",
+            "onboarding"
+          ],
+          "paths": [
+            "scene/registration/**",
+            "client/*token*",
+            "client/access-token.ts"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "dependencies"
+          ],
+          "paths": [
+            "package.json"
+          ]
+        },
+        {
+          "platform": "feishu",
+          "contracts": [
+            "protocol",
+            "interface"
+          ],
+          "docs": [
+            "docs/channel.md",
+            "docs/channel.zh.md",
+            "docs/vercel-chat-adapter/README.md"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "agentor-adapters",
+      "repo": "DemoMacro/agentor",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "qq",
+          "contracts": [
+            "adapter",
+            "interface",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "packages/chat-qq/src/**",
+            "packages/chat-qq/package.json"
+          ],
+          "docs": [
+            "packages/chat-qq/README.md"
+          ]
+        },
+        {
+          "platform": "wecom",
+          "contracts": [
+            "adapter",
+            "interface",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "packages/chat-wecom/src/**",
+            "packages/chat-wecom/package.json"
+          ],
+          "docs": [
+            "packages/chat-wecom/README.md"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "chat-adapter-weixin",
+      "repo": "wong2/chat-adapter-weixin",
+      "branch": "main",
+      "mode": "selective",
+      "routes": [
+        {
+          "platform": "weixin",
+          "contracts": [
+            "adapter",
+            "interface",
+            "message",
+            "delivery"
+          ],
+          "paths": [
+            "src/**",
+            "package.json"
+          ],
+          "docs": [
+            "README.md"
+          ]
+        }
+      ]
     }
   ]
 }

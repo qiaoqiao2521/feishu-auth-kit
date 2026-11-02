@@ -34,9 +34,11 @@ pnpm test:package
 ```
 
 [组合示例](examples/chat-sdk/telegram.mjs) 直接使用上游 `Chat`、
-`createTelegramAdapter` 和 `createMemoryState`，由宿主绑定标准 Request handler。
+`createTelegramAdapter` 和 `createMemoryState`。现有 [独立 HTTP 试点说明](examples/chat-sdk/README.md)
+提供环境模板、启动、身份检查和显式 webhook 注册命令，以及不依赖凭据的 HTTP 回归。
 示例强制 webhook secret、显式 user / chat / topic 授权、每个 bot 独立 state，
-并仅将选出的文字与身份字段交给响应函数。它不启动轮询、注册 webhook 或自动部署服务。
+并仅将选出的文字与身份字段交给响应函数。启动不轮询、不自动注册 webhook 或部署服务。
+文本往返已通过隔离验证；真实 Telegram Bot 收发和跨进程恢复仍未验证。
 
 该示例使用内存状态，未实现持久投递账本；SDK 的去重、排队或重连均不代表 exactly-once。
 生产接入仍需核对未知投递、持久状态命名空间、敏感原生标识和真实账号行为。

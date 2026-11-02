@@ -4,10 +4,11 @@ import { createTelegramAdapter } from '@chat-adapter/telegram';
 import { createMemoryState } from '@chat-adapter/state-memory';
 
 /**
- * One Chat and one fresh memory state per connected bot. Volatile, offline pilot.
+ * One Chat and one fresh memory state per connected bot. Volatile pilot.
  * The response callback receives selected model input, never the SDK raw message.
  */
-export function createTelegramPilot({ accountId, botToken, secretToken, userName, grants, respond }) {
+export function createTelegramPilot({ accountId, botToken, secretToken, userName, grants, respond,
+  apiUrl = 'https://api.telegram.org' }) {
   if (typeof accountId !== 'string' || !/^[1-9][0-9]*$/.test(accountId)
     || typeof botToken !== 'string' || !botToken.startsWith(`${accountId}:`)) {
     throw new TypeError('Provide the expected bot account and its token');
@@ -24,7 +25,7 @@ export function createTelegramPilot({ accountId, botToken, secretToken, userName
   }
   const allowed = grants.map((grant) => Object.freeze({ ...grant }));
   const adapter = createTelegramAdapter({ botToken, secretToken, userName,
-    mode: 'webhook', allowedUserIds: [...new Set(allowed.map((grant) => grant.userId))],
+    apiUrl, mode: 'webhook', allowedUserIds: [...new Set(allowed.map((grant) => grant.userId))],
     allowUnverifiedWebhooks: false, nativeStreaming: false, logger: new ConsoleLogger('silent') });
   const bot = new Chat({ userName, adapters: { telegram: adapter },
     state: createMemoryState(), logger: 'silent', concurrency: 'concurrent' });

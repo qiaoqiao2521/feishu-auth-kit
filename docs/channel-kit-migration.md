@@ -43,8 +43,10 @@ host，以及相应公开子路径。没有发布这些实验 API，也不新增
 
 [Telegram 示例](../examples/chat-sdk/telegram.mjs) 直接组合 SDK，使用 webhook-only、
 强制 secret、独立 memory state、无状态 concurrent echo 与选取后的模型输入。
-示例不安装 HTTP server，不切换 bot webhook，不注册 callback Agent 工具，也不启动
-外部 runner。绑定真实服务、凭据注入和持久后端属于后续授权账号验收。
+现提供独立 Node HTTP 入口、环境模板、Bot 身份预检和显式 webhook 注册工具，见
+[试点运行说明](../examples/chat-sdk/README.md)。入站先检查 user/chat/topic 授权，再交给
+SDK，避免拒绝用户也触发 typing。没有新增消息框架、callback Agent 或外部 runner。
+HTTP 文本往返已隔离复验；真实 Bot、公网 TLS 和持久恢复仍需分别验收。
 
 `concurrency: 'queue'` 会合并中间消息到 `context.skipped`，不是逐条 FIFO；默认 drop
 也可能丢弃并发消息，因此试点明确选择无状态 concurrent。将来串行 Agent 需要明确
@@ -68,7 +70,7 @@ host，以及相应公开子路径。没有发布这些实验 API，也不新增
 本轮未进行扫码、真实网络收发、部署或外部 Agent 执行。验证数量与 CI 结果见 PR；
 旧的协议锁文件继续作为腾讯官方源码比较基线，不能替代实际发布 adapter 的版本证据。
 
-## 本地验证记录
+## 原 PR 本地验证记录（历史）
 
 Node 24 / Python 3.12 下通过：`pnpm install --frozen-lockfile`、`pnpm test`
 （161 项，其中 20 项针对真实 Chat SDK / 候选构造 / 薄组合语义）、
@@ -78,3 +80,7 @@ Python 203 项测试、Ruff 与 wheel / sdist 构建；Actionlint、Zizmor 离�
 
 候选依赖带入的 protobufjs postinstall 只输出依赖版本警告，不生成运行文件；本轮明确
 禁用该 hook，并以完整安装和真实 adapter 导入验证发布 JS 可用。esbuild 保持原有构建许可。
+
+2026-11-03 补丁复验：190 项 TypeScript 测试、203 项 Python 测试、两项 TypeScript
+类型检查、构建和包入口检查通过。新增 29 项 HTTP/配置回归；凭据未提供，未做真实平台
+收发或跨进程恢复。不能把新增的 HTTP 回归解释为线上验收通过。

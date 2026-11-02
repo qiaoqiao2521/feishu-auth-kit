@@ -15,6 +15,11 @@
     }
   },
   "scripts": {
+    "telegram:start": "node --env-file=.env.telegram examples/chat-sdk/telegram-server.mjs",
+    "telegram:check": "node --env-file=.env.telegram examples/chat-sdk/telegram-admin.mjs check",
+    "telegram:ids": "node --env-file=.env.telegram examples/chat-sdk/telegram-admin.mjs ids",
+    "telegram:register": "node --env-file=.env.telegram examples/chat-sdk/telegram-admin.mjs register",
+    "test:telegram": "vitest run tests/telegram-server.test.ts tests/chat-sdk-integration.test.ts",
     "build": "tsup && tsc --emitDeclarationOnly",
     "dev": "vitest",
     "test": "vitest run",

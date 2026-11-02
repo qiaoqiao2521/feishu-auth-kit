@@ -9,4 +9,5 @@ build/
 *.egg-info/
 node_modules/
 .upstream-watch/
+.env.telegram
 

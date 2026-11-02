@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Watch OpenClaw Feishu upstreams and maintain rolling/cycle sync digests.
+"""Watch channel upstreams and maintain rolling/cycle sync digests.
 
 Features:
 - Per-upstream / per-cycle updatable sync digest issue (avoids issue spam)
@@ -26,6 +26,8 @@ import urllib.request
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from fnmatch import fnmatchcase
+from pathlib import Path
 from typing import Any
 
 API_ROOT = "https://api.github.com"
@@ -36,6 +38,7 @@ LABEL_COLOR = "0E8A16"
 LABEL_DESCRIPTION = "Automated upstream monitoring issue"
 USER_AGENT = "feishu-auth-kit-upstream-watch"
 DEFAULT_STATE_FILE = ".upstream-watch/state.json"
+DEFAULT_CONFIG_FILE = Path(__file__).resolve().parents[1] / "upstream" / "targets.json"
 
 STATE_MARKER_REGEX = re.compile(
     r"<!--\s*upstream-watch-state:\s*(\{.*?\})\s*-->",
@@ -81,11 +84,20 @@ class EscalationLevel(str, Enum):
 
 
 @dataclass(frozen=True)
+class WatchRoute:
+    platform: str
+    contracts: tuple[str, ...]
+    paths: tuple[str, ...] = ()
+    docs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class WatchTarget:
     key: str
     repo: str
     branch: str
-    mode: str  # "plugin" or "core"
+    mode: str  # Legacy "plugin"/"core" classification, or configured "selective" routes.
+    routes: tuple[WatchRoute, ...] = ()
 
 
 TARGETS: tuple[WatchTarget, ...] = (
@@ -102,6 +114,82 @@ TARGETS: tuple[WatchTarget, ...] = (
         mode="core",
     ),
 )
+
+
+def load_watch_targets(filepath: str | Path) -> tuple[WatchTarget, ...]:
+    """Load versioned selectors; glob paths are relative to the upstream repository root."""
+    with open(filepath, encoding="utf-8") as config_file:
+        config = json.load(config_file)
+    if not isinstance(config, dict) or set(config) != {"version", "targets"}:
+        raise ValueError("Config must contain only version and targets")
+    if type(config["version"]) is not int or config["version"] != 1:
+        raise ValueError("Unsupported upstream config version (expected 1)")
+    if not isinstance(config["targets"], list) or not config["targets"]:
+        raise ValueError("Config targets must be a nonempty list")
+
+    def identifier(value: Any, label: str) -> str:
+        if not isinstance(value, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", value):
+            raise ValueError(f"{label} must be a lowercase identifier")
+        return value
+
+    def selectors(value: Any, label: str) -> tuple[str, ...]:
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError(f"{label} must be a list of repository-relative globs")
+        for item in value:
+            if (
+                not item
+                or item.startswith("/")
+                or "\\" in item
+                or any(part in {"", ".", ".."} for part in item.split("/"))
+            ):
+                raise ValueError(f"{label} contains an invalid repository-relative glob: {item!r}")
+        return tuple(value)
+
+    targets: list[WatchTarget] = []
+    keys: set[str] = set()
+    for entry in config["targets"]:
+        if not isinstance(entry, dict) or set(entry) != {"key", "repo", "branch", "mode", "routes"}:
+            raise ValueError("Each target requires key, repo, branch, mode and routes")
+        key = identifier(entry["key"], "Target key")
+        if key in keys:
+            raise ValueError(f"Duplicate target key: {key}")
+        keys.add(key)
+        repo = entry["repo"]
+        if not isinstance(repo, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", repo
+        ):
+            raise ValueError(f"Invalid repository for {key}: expected owner/repository")
+        branch = entry["branch"]
+        if (
+            not isinstance(branch, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", branch)
+            or ".." in branch
+        ):
+            raise ValueError(f"Invalid branch for {key}")
+        if entry["mode"] not in ("plugin", "core", "selective"):
+            raise ValueError(f"Invalid mode for {key}")
+        if not isinstance(entry["routes"], list) or not entry["routes"]:
+            raise ValueError(f"Target {key} requires at least one route")
+        routes: list[WatchRoute] = []
+        for route in entry["routes"]:
+            if (
+                not isinstance(route, dict)
+                or not {"platform", "contracts"} <= set(route)
+                or set(route) - {"platform", "contracts", "paths", "docs"}
+            ):
+                raise ValueError(f"Invalid route fields for {key}")
+            platform = identifier(route["platform"], f"Platform in {key}")
+            contracts = route["contracts"]
+            if not isinstance(contracts, list) or not contracts:
+                raise ValueError(f"Route contracts for {key}/{platform} must be a nonempty list")
+            contract_ids = tuple(identifier(item, "Contract") for item in contracts)
+            paths = selectors(route.get("paths", []), f"Paths in {key}/{platform}")
+            docs = selectors(route.get("docs", []), f"Docs in {key}/{platform}")
+            if not paths and not docs:
+                raise ValueError(f"Route {key}/{platform} needs paths or explicit docs selectors")
+            routes.append(WatchRoute(platform, contract_ids, paths, docs))
+        targets.append(WatchTarget(key, repo, branch, entry["mode"], tuple(routes)))
+    return tuple(targets)
 
 
 @dataclass
@@ -194,6 +282,8 @@ class CandidateCommit:
     escalation: EscalationLevel
     html_url: str
     author: str = ""
+    platforms: list[str] = field(default_factory=list)
+    contracts: list[str] = field(default_factory=list)
 
     @property
     def short_sha(self) -> str:
@@ -202,7 +292,12 @@ class CandidateCommit:
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Watch OpenClaw Feishu upstreams and maintain rolling/cycle sync digests.",
+        description="Watch configured channel upstreams and maintain rolling/cycle sync digests.",
+    )
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_FILE),
+        help="Versioned target/route JSON (default: upstream/targets.json beside this repository).",
     )
     parser.add_argument("--owner", help="Issue target owner (default: current workflow owner).")
     parser.add_argument("--repo", help="Issue target repository (default: current workflow repo).")
@@ -403,6 +498,10 @@ ISOLATED_CORE_SCOPES = (
 
 def can_skip_commit_detail(target: WatchTarget, message: str) -> bool:
     """Determine if a commit can be skipped before making an API call for files."""
+    if target.routes:
+        # A title cannot prove a path exclusion: protocol docs, dependencies and
+        # cross-channel changes can be relevant even under another commit scope.
+        return False
     if is_low_signal_commit(message):
         return True
 
@@ -492,6 +591,69 @@ def critical_change_reason(message: str, *, is_auth: bool) -> str | None:
     return None
 
 
+def classify_routed_commit(
+    target: WatchTarget, detail: dict[str, Any], raw_message: str, filenames: list[str]
+) -> CandidateCommit | None:
+    """Select channel contracts from paths, retaining explicitly watched protocol docs."""
+    matched_files: set[str] = set()
+    protocol_docs: set[str] = set()
+    platforms: set[str] = set()
+    contracts: set[str] = set()
+    for route in target.routes:
+        route_files: set[str] = set()
+        for filename in filenames:
+            explicit_doc = any(fnmatchcase(filename, pattern) for pattern in route.docs)
+            source_match = any(fnmatchcase(filename, pattern) for pattern in route.paths)
+            if explicit_doc or (source_match and not is_all_noise_files([filename])):
+                route_files.add(filename)
+            if explicit_doc:
+                protocol_docs.add(filename)
+        if route_files:
+            matched_files.update(route_files)
+            platforms.add(route.platform)
+            contracts.update(route.contracts)
+    if not matched_files:
+        return None
+    first_line = raw_message.splitlines()[0]
+    if is_low_signal_commit(first_line) and not protocol_docs:
+        return None
+    runtime_files = {
+        filename for filename in matched_files
+        if not is_test_file(filename) and not is_all_noise_files([filename])
+    }
+    reasons = [f"platform:{platform}" for platform in sorted(platforms)]
+    reasons.extend(f"contract:{contract}" for contract in sorted(contracts))
+    critical_reason = critical_change_reason(raw_message, is_auth="auth" in contracts)
+    if runtime_files and critical_reason:
+        reasons.append(critical_reason)
+        escalation = EscalationLevel.P1_CRITICAL
+    elif runtime_files or protocol_docs:
+        escalation = EscalationLevel.P2_NOTICE
+    else:
+        reasons.append("test-only")
+        escalation = EscalationLevel.P3_ROUTINE
+    if protocol_docs:
+        reasons.append("protocol-doc")
+    commit = detail.get("commit", {})
+    sha = detail.get("sha", "")
+    return CandidateCommit(
+        target_key=target.key,
+        upstream_repo=target.repo,
+        sha=sha,
+        commit_date=(commit.get("committer", {}).get("date")
+                     or commit.get("author", {}).get("date") or ""),
+        message=first_line,
+        filenames=filenames,
+        reasons=reasons,
+        escalation=escalation,
+        html_url=detail.get("html_url") or f"https://github.com/{target.repo}/commit/{sha}",
+        author=(commit.get("author", {}).get("name")
+                or detail.get("author", {}).get("login") or ""),
+        platforms=sorted(platforms),
+        contracts=sorted(contracts),
+    )
+
+
 def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCommit | None:
     commit_info = detail.get("commit", {})
     raw_message = commit_info.get("message", "").strip()
@@ -501,6 +663,8 @@ def classify_commit(target: WatchTarget, detail: dict[str, Any]) -> CandidateCom
 
     files = detail.get("files") or []
     filenames = [str(item.get("filename") or "") for item in files]
+    if target.routes:
+        return classify_routed_commit(target, detail, raw_message, filenames)
     lower_message = first_line.lower()
     lower_files = [name.lower() for name in filenames]
     commit_date = (
@@ -800,14 +964,17 @@ def fetch_commit_detail(session: GitHubSession, *, repo: str, sha: str) -> dict[
     return session.request("GET", f"repos/{repo}/commits/{sha}")
 
 
-def ensure_labels(session: GitHubSession, *, owner: str, repo: str) -> None:
+def ensure_labels(
+    session: GitHubSession, *, owner: str, repo: str, targets: tuple[WatchTarget, ...] = TARGETS
+) -> None:
     labels_to_ensure = [
         (LABEL_NAME, LABEL_COLOR, LABEL_DESCRIPTION),
-        ("upstream:openclaw-lark", "1D76DB", "OpenClaw Lark upstream updates"),
-        ("upstream:openclaw-core", "5319E7", "OpenClaw Core upstream updates"),
         ("p1-critical", "B60205", "Critical breaking upstream changes"),
-        ("p2-notice", "D93F0B", "Relevant Feishu feature / bugfix"),
+        ("p2-notice", "D93F0B", "Relevant channel feature / bugfix"),
     ]
+    labels_to_ensure.extend(
+        (f"upstream:{target.key}", "1D76DB", f"{target.key} upstream updates") for target in targets
+    )
     for name, color, desc in labels_to_ensure:
         try:
             session.request("GET", f"repos/{owner}/{repo}/labels/{name}")
@@ -967,7 +1134,7 @@ def render_digest_body(
                 f"{item.message} (`{', '.join(item.reasons)}`)"
             )
     if p2_items:
-        checklist_lines.append(f"\n### ⚡ P2 Feishu Features & Fixes ({len(p2_items)})")
+        checklist_lines.append(f"\n### ⚡ P2 Channel Features & Fixes ({len(p2_items)})")
         for item in p2_items[:15]:
             checklist_lines.append(f"- [ ] [`{item.short_sha}`]({item.html_url}) {item.message}")
         if len(p2_items) > 15:
@@ -1049,11 +1216,11 @@ def render_digest_body(
         f"<summary>🔍 Detailed Commit Inspect & File Diff Lists</summary>\n\n"
         f"{details_block}\n"
         f"</details>\n\n"
-        f"## 🛠 Upstream Sync Guide for feishu-auth-kit\n\n"
-        f"1. For **P1 Critical** changes: check auth scopes, OAuth device-flow params, "
-        f"or card-action JSON schema.\n"
-        f"2. For **P2 Notice** changes: test native inbound envelope parser "
-        f"and CardKit rendering.\n"
+        f"## 🛠 Upstream Sync Guide\n\n"
+        f"1. For **P1 Critical** changes: verify affected authentication, security "
+        f"and breaking contracts.\n"
+        f"2. For **P2 Notice** changes: follow the platform/contract signals to "
+        f"update adapters, dependency compatibility and protocol fixtures.\n"
         f"3. Check off items above as they are verified or integrated.\n\n"
         f"---\n"
         f"{state_marker}\n"
@@ -1103,7 +1270,7 @@ def evaluate_offline_corpus(
             files = re.findall(r"- `([^`]+)`", f_part)
 
         target = repo_to_target.get(repo)
-        if not target:
+        if not target and not repo:
             if "openclaw-lark" in body:
                 target = target_map.get("openclaw-lark")
             else:
@@ -1143,6 +1310,8 @@ def evaluate_offline_corpus(
                     "summary": cand.message,
                     "escalation": cand.escalation.value,
                     "signals": cand.reasons,
+                    "platforms": cand.platforms,
+                    "contracts": cand.contracts,
                     "url": cand.html_url,
                 }
             )
@@ -1152,10 +1321,19 @@ def evaluate_offline_corpus(
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    try:
+        configured_targets = load_watch_targets(args.config)
+    except (OSError, ValueError) as exc:
+        print(f"Invalid upstream config {args.config}: {exc}", file=sys.stderr)
+        return 2
+    active_targets = tuple(t for t in configured_targets if not args.target or t.key == args.target)
+    if not active_targets:
+        print(f"Unknown target in upstream config: {args.target}", file=sys.stderr)
+        return 2
 
     if args.offline_corpus:
         print(f"Running offline evaluation on corpus: {args.offline_corpus}...")
-        eval_results = evaluate_offline_corpus(args.offline_corpus)
+        eval_results = evaluate_offline_corpus(args.offline_corpus, targets=active_targets)
         print(json.dumps(eval_results, indent=2, ensure_ascii=False))
         return 0
 
@@ -1175,9 +1353,8 @@ def main(argv: list[str] | None = None) -> int:
     since_date = now_utc - dt.timedelta(days=args.lookback_days)
 
     if not args.dry_run and token:
-        ensure_labels(session, owner=args.owner, repo=args.repo)
+        ensure_labels(session, owner=args.owner, repo=args.repo, targets=active_targets)
 
-    active_targets = [t for t in TARGETS if not args.target or t.key == args.target]
     summary_results: list[dict[str, Any]] = []
 
     for target in active_targets:

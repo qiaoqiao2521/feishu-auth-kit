@@ -1,0 +1,10 @@
+{
+  "workspace_id": "T_REPLACE",
+  "app_id": "A_REPLACE",
+  "owner_user_id": "U_REPLACE",
+  "dm_channel_id": "D_REPLACE",
+  "server_url": "http://127.0.0.1:3100",
+  "company_id": "REPLACE_COMPANY_ID",
+  "agent_id": "REPLACE_AGENT_ID",
+  "board_user_id": "local-board"
+}

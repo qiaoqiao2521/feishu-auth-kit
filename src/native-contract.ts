@@ -8,6 +8,12 @@ import { ContinuationState, FileContinuationStore } from './runtime-cards.js';
 
 export const NATIVE_CONTINUATION_KIND = 'native_agent_continuation';
 
+export const NATIVE_CONTINUATION_STATUS = {
+  waiting: 'waiting',
+  confirmed: 'confirmed',
+  delivered: 'delivered',
+} as const;
+
 export class NativeCardAction {
   readonly operationId: string;
   readonly action: string;
@@ -193,25 +199,62 @@ export class ResolvedNativeAction {
   readonly action: NativeCardAction;
   readonly continuation: NativeContinuationRecord;
   readonly retryRequest: NativeRetryRequest;
+  /** True when the click was suppressed because this operation was already confirmed/delivered. */
+  readonly duplicate: boolean;
 
   constructor(options: {
     action: NativeCardAction;
     continuation: NativeContinuationRecord;
     retryRequest: NativeRetryRequest;
+    duplicate?: boolean;
   }) {
     this.action = options.action;
     this.continuation = options.continuation;
     this.retryRequest = options.retryRequest;
+    this.duplicate = options.duplicate ?? false;
   }
 
   toDict(): Record<string, any> {
     return {
       schema: 'feishu-auth-kit.native-action-resolution.v1',
+      duplicate: this.duplicate,
       action: this.action.toDict(),
       continuation: this.continuation.toDict(),
       retry_request: this.retryRequest.toDict(),
     };
   }
+}
+
+interface StoredResolution {
+  action: NativeCardAction;
+  retryRequest: NativeRetryRequest;
+}
+
+function storedResolution(continuation: NativeContinuationRecord): StoredResolution | null {
+  const action = continuation.metadata.resolved_action;
+  const retryRequest = continuation.metadata.resolved_retry_request;
+  if (!action || !retryRequest) {
+    return null;
+  }
+  return {
+    action: new NativeCardAction({
+      operationId: String(action.operation_id),
+      action: String(action.action),
+      actorOpenId: action.actor_open_id ?? null,
+      messageId: action.message_id ?? null,
+      payload: action.payload || {},
+    }),
+    retryRequest: new NativeRetryRequest({
+      operationId: String(retryRequest.operation_id),
+      appId: String(retryRequest.app_id),
+      continuationKind: String(retryRequest.continuation_kind),
+      action: String(retryRequest.action),
+      text: String(retryRequest.text),
+      actorOpenId: retryRequest.actor_open_id ?? null,
+      userOpenId: retryRequest.user_open_id ?? null,
+      metadata: retryRequest.metadata || {},
+    }),
+  };
 }
 
 export function saveNativeContinuation(
@@ -279,6 +322,57 @@ export function resolveCardActionToRetry(
   if (!continuation) {
     throw new Error(`unknown native continuation operation_id: ${action.operationId}`);
   }
+
+  // Duplicate-click guard: once a click is confirmed (or delivered) the decision
+  // is locked. Later clicks — double clicks, concurrent callbacks, replays after a
+  // slow transport — return the recorded resolution with duplicate=true and never
+  // emit a second retry request, so the card cannot drift into a dirty state.
+  if (continuation.status === 'confirmed' || continuation.status === 'delivered') {
+    const stored = storedResolution(continuation);
+    if (stored) {
+      return new ResolvedNativeAction({
+        action: stored.action,
+        continuation,
+        retryRequest: stored.retryRequest,
+        duplicate: true,
+      });
+    }
+    // confirmed/delivered without a stored resolution (e.g. hand-edited state):
+    // still refuse to double-confirm, but surface the current continuation.
+    return new ResolvedNativeAction({
+      action,
+      continuation,
+      retryRequest: new NativeRetryRequest({
+        operationId: continuation.operationId,
+        appId: continuation.appId,
+        continuationKind: continuation.continuationKind,
+        action: action.action,
+        text: continuation.retryText,
+        actorOpenId: action.actorOpenId,
+        userOpenId: continuation.userOpenId,
+        metadata: continuation.metadata,
+      }),
+      duplicate: true,
+    });
+  }
+
+  const confirmedMetadata = {
+    ...continuation.metadata,
+    last_action: action.action,
+    actor_open_id: action.actorOpenId,
+    action_payload: action.payload,
+    message_id: action.messageId,
+  };
+  const retryRequest = new NativeRetryRequest({
+    operationId: continuation.operationId,
+    appId: continuation.appId,
+    continuationKind: continuation.continuationKind,
+    action: action.action,
+    text: continuation.retryText,
+    actorOpenId: action.actorOpenId,
+    userOpenId: continuation.userOpenId,
+    metadata: confirmedMetadata,
+  });
   const confirmed = new NativeContinuationRecord({
     operationId: continuation.operationId,
     appId: continuation.appId,
@@ -289,31 +383,89 @@ export function resolveCardActionToRetry(
     requiredScopes: continuation.requiredScopes,
     status: 'confirmed',
     metadata: {
-      ...continuation.metadata,
-      last_action: action.action,
-      actor_open_id: action.actorOpenId,
-      action_payload: action.payload,
-      message_id: action.messageId,
+      ...confirmedMetadata,
+      resolved_action: action.toDict(),
+      resolved_retry_request: retryRequest.toDict(),
     },
   });
   saveNativeContinuation(store, confirmed);
-
-  const retryRequest = new NativeRetryRequest({
-    operationId: confirmed.operationId,
-    appId: confirmed.appId,
-    continuationKind: confirmed.continuationKind,
-    action: action.action,
-    text: confirmed.retryText,
-    actorOpenId: action.actorOpenId,
-    userOpenId: confirmed.userOpenId,
-    metadata: confirmed.metadata,
-  });
 
   return new ResolvedNativeAction({
     action,
     continuation: confirmed,
     retryRequest,
   });
+}
+
+export function markRetryDelivered(
+  store: FileContinuationStore,
+  operationId: string,
+): NativeContinuationRecord {
+  const continuation = loadNativeContinuation(store, operationId);
+  if (!continuation) {
+    throw new Error(`unknown native continuation operation_id: ${operationId}`);
+  }
+  if (continuation.status === 'delivered') {
+    return continuation;
+  }
+  if (continuation.status !== 'confirmed') {
+    throw new Error(
+      `cannot mark retry delivered for operation_id ${operationId} in status ${continuation.status}`,
+    );
+  }
+  const delivered = new NativeContinuationRecord({
+    operationId: continuation.operationId,
+    appId: continuation.appId,
+    continuationKind: continuation.continuationKind,
+    retryText: continuation.retryText,
+    flowKey: continuation.flowKey,
+    userOpenId: continuation.userOpenId,
+    requiredScopes: continuation.requiredScopes,
+    status: 'delivered',
+    metadata: continuation.metadata,
+  });
+  saveNativeContinuation(store, delivered);
+  return delivered;
+}
+
+export function markRetryFailed(
+  store: FileContinuationStore,
+  operationId: string,
+  options?: { reason?: string | null },
+): NativeContinuationRecord {
+  const continuation = loadNativeContinuation(store, operationId);
+  if (!continuation) {
+    throw new Error(`unknown native continuation operation_id: ${operationId}`);
+  }
+  if (continuation.status !== 'confirmed' && continuation.status !== 'delivered') {
+    throw new Error(
+      `cannot mark retry failed for operation_id ${operationId} in status ${continuation.status}`,
+    );
+  }
+  const failures = Number(continuation.metadata.delivery_failures ?? 0) + 1;
+  const metadata = { ...continuation.metadata };
+  delete metadata.resolved_action;
+  delete metadata.resolved_retry_request;
+  // Back to waiting: the next genuine click re-resolves from scratch, so a timed
+  // out or errored delivery never wedges the card in a half-applied state.
+  const reset = new NativeContinuationRecord({
+    operationId: continuation.operationId,
+    appId: continuation.appId,
+    continuationKind: continuation.continuationKind,
+    retryText: continuation.retryText,
+    flowKey: continuation.flowKey,
+    userOpenId: continuation.userOpenId,
+    requiredScopes: continuation.requiredScopes,
+    status: 'waiting',
+    metadata: {
+      ...metadata,
+      delivery_failures: failures,
+      last_failure_reason: options?.reason ?? null,
+      last_confirmed_action: continuation.metadata.last_action ?? null,
+    },
+  });
+  saveNativeContinuation(store, reset);
+  return reset;
 }
 
 export function buildRetryArtifactFromRequest(

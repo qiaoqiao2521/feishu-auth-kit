@@ -6,6 +6,24 @@ import { AgentTurnRequest, CodexCliRunner, EchoRunner } from './agent-runtime.js
 import { AppRegistrationClient, AppRegistrationPollResult } from './app-registration.js';
 import { buildSingleCardRun } from './cardkit.js';
 import {
+  CARD_TEMPLATE_NAMES,
+  buildDemoCardPayload,
+  isCardTemplateName,
+} from './card-templates.js';
+import {
+  CardSimulator,
+  createTemplateSimulation,
+  runCardSimulationLoop,
+} from './card-simulator.js';
+import {
+  AmmoRoute,
+  FleetSnapshot,
+  WaterfallCliRunner,
+  answerAutoloopAsk,
+  buildFleetBoardCard,
+  suspendAutoloopAsk,
+} from './autoloop.js';
+import {
   buildClaudeDeviceFlowPayload,
   buildClaudePermissionPayload,
 } from './claude-adapter.js';
@@ -926,6 +944,310 @@ async function cmdAgentActionToRetry(opts: Record<string, any>): Promise<number>
   return 0;
 }
 
+async function cmdCardTemplates(opts: Record<string, any>): Promise<number> {
+  const name = typeof opts.template === 'string' ? opts.template : undefined;
+  if (name) {
+    if (!isCardTemplateName(name)) {
+      console.error(`Unknown template: ${name} (expected one of ${CARD_TEMPLATE_NAMES.join(', ')})`);
+      return 2;
+    }
+    jsonDump(buildDemoCardPayload(name));
+    return 0;
+  }
+  const templates: Record<string, any> = {};
+  for (const templateName of CARD_TEMPLATE_NAMES) {
+    templates[templateName] = buildDemoCardPayload(templateName);
+  }
+  jsonDump({ schema: 'feishu-auth-kit.card-templates.v1', templates });
+  return 0;
+}
+
+async function cmdCardSimulate(opts: Record<string, any>): Promise<number> {
+  const source = typeof opts.template === 'string' ? opts.template : undefined;
+  const clicks = String(opts.click ?? '')
+    .split(',')
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value >= 0);
+
+  let simulator: CardSimulator;
+  let simulation: ReturnType<typeof createTemplateSimulation> | null = null;
+
+  if (source) {
+    if (!isCardTemplateName(source)) {
+      console.error(
+        `Unknown template: ${source} (expected one of ${CARD_TEMPLATE_NAMES.join(', ')})`,
+      );
+      return 2;
+    }
+    simulation = createTemplateSimulation(source, {
+      storePath: opts.store === undefined ? undefined : opts.store === null ? null : String(opts.store),
+      deliveryFailure: Boolean(opts['delivery-failure']),
+      freshStore: Boolean(opts['fresh-store']),
+    });
+    simulator = new CardSimulator({
+      payload: simulation.payload,
+      dispatcher: simulation.dispatcher,
+      actorOpenId: opts.actor ? String(opts.actor) : undefined,
+      color: opts.color === false ? false : undefined,
+      width: opts.width ? Number(opts.width) : undefined,
+    });
+  } else if (opts.file) {
+    simulator = new CardSimulator({
+      payload: loadJsonFile(String(opts.file)),
+      actorOpenId: opts.actor ? String(opts.actor) : undefined,
+      color: opts.color === false ? false : undefined,
+      width: opts.width ? Number(opts.width) : undefined,
+    });
+  } else {
+    console.error('Usage: feishu-auth-kit card simulate <template-name> [--click N,...] or --file <card.json>');
+    return 2;
+  }
+
+  if (clicks.length > 0 || !process.stdout.isTTY) {
+    // Collapse runs of identical indexes into race groups: `--click 0,0`
+    // dispatches both callbacks against the same pre-click payload, exercising
+    // the double-click idempotency guard.
+    const groups: Array<{ index: number; times: number }> = [];
+    for (const clickIndex of clicks) {
+      const last = groups[groups.length - 1];
+      if (last && last.index === clickIndex) {
+        last.times += 1;
+      } else {
+        groups.push({ index: clickIndex, times: 1 });
+      }
+    }
+    for (const group of groups) {
+      console.log(
+        group.times > 1
+          ? `--- click ${group.index} x${group.times} (concurrent race) ---`
+          : `--- click ${group.index} ---`,
+      );
+      try {
+        if (group.times > 1) {
+          await simulator.clickRepeated(group.index, group.times);
+        } else {
+          await simulator.click(group.index);
+        }
+      } catch (err) {
+        console.error(String((err as Error).message ?? err));
+        return 1;
+      }
+      console.log(simulator.render({ color: opts.color === false ? false : true }));
+    }
+    if (simulation) {
+      const state = simulation.store.load(simulation.controller.operationId);
+      jsonDump({
+        schema: 'feishu-auth-kit.card-simulation.v1',
+        template: simulation.templateName,
+        operation_id: simulation.controller.operationId,
+        continuation: state,
+        final_payload: simulator.payload,
+      });
+    }
+    return 0;
+  }
+
+  await runCardSimulationLoop(simulator);
+  return 0;
+}
+
+// 11. Autoloop Commands (Pure-Code Board + Multi-Ammo Waterfall + Zero-Token Suspend)
+async function cmdAutoloopBoard(opts: Record<string, any>): Promise<number> {
+  const fleetFile = opts['fleet-file'] || opts.fleetFile;
+  if (!fleetFile || !fs.existsSync(String(fleetFile))) {
+    console.error('--fleet-file is required and must exist');
+    return 2;
+  }
+  const snapshot: FleetSnapshot = JSON.parse(fs.readFileSync(String(fleetFile), 'utf-8'));
+  const card = buildFleetBoardCard(snapshot);
+
+  if (opts.render) {
+    const sim = new CardSimulator({ payload: card });
+    console.log(sim.render({ color: opts.color !== false }));
+  }
+
+  const chatId = opts['chat-id'] || opts.chatId || process.env.FEISHU_CHAT_ID;
+  if (opts.send && chatId) {
+    const client = requireClient(opts);
+    const sent = await client.sendCard(String(chatId), card);
+    jsonDump({
+      schema: 'feishu-auth-kit.autoloop.board.v1',
+      sent: true,
+      message_id: sent.message_id,
+      card,
+    });
+    return 0;
+  }
+
+  jsonDump({
+    schema: 'feishu-auth-kit.autoloop.board.v1',
+    sent: false,
+    card,
+  });
+  return 0;
+}
+
+async function cmdAutoloopRun(opts: Record<string, any>): Promise<number> {
+  const prompt = opts.prompt || (opts['prompt-file'] ? fs.readFileSync(String(opts['prompt-file']), 'utf-8') : '');
+  if (!prompt || !String(prompt).trim()) {
+    console.error('--prompt or --prompt-file is required');
+    return 2;
+  }
+
+  let routes: AmmoRoute[] | undefined;
+  const routesFile = opts['routes-file'] || opts.routesFile;
+  if (routesFile && fs.existsSync(String(routesFile))) {
+    routes = JSON.parse(fs.readFileSync(String(routesFile), 'utf-8'));
+  }
+
+  const cwd = opts.cwd ? String(opts.cwd) : null;
+  const cooldownPath = opts['cooldown-file'] ? String(opts['cooldown-file']) : undefined;
+  const runner = new WaterfallCliRunner({ routes, cwd, cooldownPath });
+
+  const dummyContext: any = {
+    eventType: 'autoloop.run',
+    messageId: opts['operation-id'] || newOperationId(),
+    chatId: opts['chat-id'] || process.env.FEISHU_CHAT_ID || null,
+    senderOpenId: opts['actor-open-id'] || null,
+    promptText: () => String(prompt),
+    toDict: () => ({ event_type: 'autoloop.run' }),
+  };
+
+  const turnReq = new AgentTurnRequest({
+    context: dummyContext,
+    prompt: String(prompt),
+    systemPrompt: opts['system-prompt'] ? String(opts['system-prompt']) : null,
+    sessionId: opts['session-id'] ? String(opts['session-id']) : null,
+  });
+
+  const turnResult = runner.run(turnReq);
+  const storePath = opts.store ? String(opts.store) : undefined;
+  const store = new FileContinuationStore(storePath);
+  const { appId } = credentialsFromArgs(opts);
+  const chatId = opts['chat-id'] || opts.chatId || process.env.FEISHU_CHAT_ID;
+
+  if (turnResult.status === 'suspended_ask' && turnResult.metadata.ask) {
+    const suspended = suspendAutoloopAsk(store, {
+      appId: appId || 'local',
+      operationId: opts['operation-id'] ? String(opts['operation-id']) : undefined,
+      ask: turnResult.metadata.ask,
+      summaryText: turnResult.metadata.summary_text || '',
+      originalPrompt: String(prompt),
+      cwd,
+      sessionId: opts['session-id'] ? String(opts['session-id']) : null,
+      botName: opts['bot-name'] ? String(opts['bot-name']) : undefined,
+      nodeName: opts['node-name'] ? String(opts['node-name']) : undefined,
+    });
+
+    let messageId: string | null = null;
+    if (opts.send && chatId) {
+      const client = requireClient(opts);
+      const sent = await client.sendCard(String(chatId), suspended.card);
+      messageId = sent.message_id;
+    }
+
+    jsonDump({
+      schema: 'feishu-auth-kit.autoloop.run.v1',
+      status: 'suspended_ask',
+      operation_id: suspended.operationId,
+      selected_route: turnResult.metadata.selected_route,
+      selected_label: turnResult.metadata.selected_label,
+      attempts: turnResult.metadata.attempts,
+      message_id: messageId,
+      card: suspended.card,
+    });
+    return 0;
+  }
+
+  let messageId: string | null = null;
+  if (opts.send && chatId && turnResult.status === 'completed') {
+    const client = requireClient(opts);
+    const botPrefix = opts['bot-name'] ? `[${opts['bot-name']}] ` : '';
+    const text = `${botPrefix}✅ 自动闭环完成（弹药：${turnResult.metadata.selected_label}）：\n${turnResult.metadata.summary_text || turnResult.outputText}`;
+    const sent = await client.sendText(String(chatId), text);
+    messageId = sent.message_id;
+  }
+
+  jsonDump({
+    schema: 'feishu-auth-kit.autoloop.run.v1',
+    status: turnResult.status,
+    selected_route: turnResult.metadata.selected_route,
+    selected_label: turnResult.metadata.selected_label,
+    attempts: turnResult.metadata.attempts,
+    output_text: turnResult.metadata.summary_text || turnResult.outputText,
+    message_id: messageId,
+  });
+  return turnResult.status === 'error' ? 1 : 0;
+}
+
+async function cmdAutoloopAnswer(opts: Record<string, any>): Promise<number> {
+  const operationId = opts['operation-id'] || opts.operationId;
+  const choice = opts.choice;
+  if (!operationId || choice === undefined) {
+    console.error('--operation-id and --choice are required');
+    return 2;
+  }
+
+  let routes: AmmoRoute[] | undefined;
+  const routesFile = opts['routes-file'] || opts.routesFile;
+  if (routesFile && fs.existsSync(String(routesFile))) {
+    routes = JSON.parse(fs.readFileSync(String(routesFile), 'utf-8'));
+  }
+
+  const storePath = opts.store ? String(opts.store) : undefined;
+  const store = new FileContinuationStore(storePath);
+  const runner = new WaterfallCliRunner({
+    routes,
+    cwd: opts.cwd ? String(opts.cwd) : null,
+    cooldownPath: opts['cooldown-file'] ? String(opts['cooldown-file']) : undefined,
+  });
+
+  const answered = answerAutoloopAsk(store, runner, {
+    operationId: String(operationId),
+    choice: String(choice),
+    actorOpenId: opts['actor-open-id'] ? String(opts['actor-open-id']) : null,
+  });
+
+  const chatId = opts['chat-id'] || opts.chatId || process.env.FEISHU_CHAT_ID;
+  let messageId: string | null = null;
+  if (opts.send && chatId && !answered.duplicate && answered.turnResult) {
+    const client = requireClient(opts);
+    const sent = await client.sendText(
+      String(chatId),
+      `✅ 拍板「${answered.chosenOption}」已执行完毕（弹药：${answered.turnResult.metadata.selected_label}）：\n${answered.turnResult.metadata.summary_text || answered.turnResult.outputText}`,
+    );
+    messageId = sent.message_id;
+  }
+
+  jsonDump({
+    schema: 'feishu-auth-kit.autoloop.answer.v1',
+    operation_id: String(operationId),
+    duplicate: answered.duplicate,
+    chosen_option: answered.chosenOption,
+    updated_card: answered.updatedCard,
+    turn_result: answered.turnResult ? answered.turnResult.toDict() : null,
+    message_id: messageId,
+  });
+  return answered.turnResult?.status === 'error' ? 1 : 0;
+}
+
+async function cmdAutoloopSendCard(opts: Record<string, any>): Promise<number> {
+  const client = requireClient(opts);
+  const chatId = opts['chat-id'] || opts.chatId || process.env.FEISHU_CHAT_ID;
+  const cardFile = opts['card-file'] || opts.cardFile;
+  if (!chatId || !cardFile || !fs.existsSync(String(cardFile))) {
+    console.error('--chat-id and existing --card-file are required');
+    return 2;
+  }
+  const card = JSON.parse(fs.readFileSync(String(cardFile), 'utf-8'));
+  const sent = await client.sendCard(String(chatId), card);
+  jsonDump({
+    schema: 'feishu-auth-kit.autoloop.send-card.v1',
+    message_id: sent.message_id,
+  });
+  return 0;
+}
+
 // Command dispatcher
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
@@ -1081,6 +1403,34 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           return cmdAgentActionToRetry(opts);
         default:
           console.error(`Unknown agent command: ${secondary}`);
+          return 2;
+      }
+
+    case 'card':
+      switch (secondary) {
+        case 'templates':
+          return cmdCardTemplates({ ...opts, template: opts.template ?? positionals[2] });
+        case 'simulate':
+          return cmdCardSimulate({ ...opts, template: opts.template ?? positionals[2] });
+        default:
+          console.error(`Unknown card command: ${secondary} (expected: templates | simulate)`);
+          return 2;
+      }
+
+    case 'autoloop':
+      switch (secondary) {
+        case 'board':
+          return cmdAutoloopBoard(opts);
+        case 'run':
+          return cmdAutoloopRun(opts);
+        case 'answer':
+          return cmdAutoloopAnswer(opts);
+        case 'send-card':
+          return cmdAutoloopSendCard(opts);
+        default:
+          console.error(
+            `Unknown autoloop command: ${secondary} (expected: board | run | answer | send-card)`,
+          );
           return 2;
       }
 

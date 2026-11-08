@@ -54,7 +54,9 @@ ControlMesh、Claude Code、OpenClaw，或者自定义脚本，都可以复用�
 | Streaming & Throttle | 吸收 `openclaw-lark` 的 `FlushController` 与 `StreamingCardController`，打字机流式输出与 300ms 防抖更新，避免触发飞书限流 |
 | Reactions | IM 消息表情交互（`addReaction` / `removeReaction` / `withReactionLifecycle`），支持处理中/成功/失败状态标记 |
 | Interactive Dispatcher | CardKit 按钮与回调事件分发器，支持路由、Toast 与原地更新卡片 |
-| Native contract | 独立于宿主 runtime 的 card action -> continuation -> retry request/artifact contract |
+| Card templates | 五套即插即用交互卡模板：执行计划确认、流式打字机、进度跟踪、多选决策、错误重试 |
+| Card simulator | 零网络依赖的本地 CLI 卡片沙箱：渲染 CardKit JSON、模拟点击回调、走完整 continuation 合同 |
+| Native contract | 独立于宿主 runtime 的 card action -> continuation -> retry request/artifact contract，含幂等去重与 delivered/failed 状态机 |
 | Runtime cards | 通用的缺权限卡、device-flow 卡片 payload |
 | Orchestration | pending flow registry、scope merge、batch planning、synthetic retry |
 | Claude surface | 面向 Claude / tool caller 的轻量 JSON wrapper |
@@ -416,6 +418,58 @@ feishu-auth-kit agent action-to-retry \
 
 这个仓库仍然不包含真正的 Feishu sender 或 callback server。像 ControlMesh 这类
 宿主 runtime 可以在后面消费这些 contract。
+
+
+## Card Studio 与本地模拟器
+
+开发交互卡片时不再需要公网 webhook 和真机飞书账号：`card` 命令组提供本地沙箱。
+
+五套模板（`src/card-templates.ts`），按钮 value 一律携带 `operation_id` + `action`，
+可直接绑定 native continuation：
+
+| 模板 | 用途 |
+|---|---|
+| `plan_confirmation` | Agent 执行计划确认卡（批准/驳回，决策锁定） |
+| `typewriter` | 长文本流式打字机卡（包装 `StreamingCardController`） |
+| `progress_tracking` | 带进度条的状态跟踪卡（步进、取消、汇总） |
+| `multi_select` | 多选决策卡（toggle 按钮、最小/最大约束、确认提交） |
+| `error_retry` | 错误重试卡（尝试历史、重试/放弃） |
+
+```bash
+# 打印模板 JSON（--template 可选单个）
+feishu-auth-kit card templates
+
+# 本地渲染并模拟双击竞态：两个回调都打在旧卡上，第二次被幂等保护拦截
+feishu-auth-kit card simulate plan_confirmation --click 0,0 --fresh-store
+
+# 模拟投递失败（超时回滚到 waiting，卡片不出现脏状态）
+feishu-auth-kit card simulate error_retry --click 0 --delivery-failure --fresh-store
+
+# 交互模式（TTY 下 ↑/↓ 选择按钮，Enter 点击，q 退出）
+feishu-auth-kit card simulate multi_select
+
+# 渲染任意 CardKit JSON 文件
+feishu-auth-kit card simulate --file examples/my-card.json --click 0
+```
+
+模拟器完全离线：渲染走 ANSI 终端输出（`NO_COLOR`/`FORCE_COLOR` 可控），点击会
+合成标准 `card.action.trigger` 事件并交给 `InteractiveActionDispatcher`，
+返回的 `{toast, card}` 原地更新下一帧。库内 API（`CardSimulator`、
+`renderCardJson`、`createTemplateSimulation`）可直接在测试中使用。
+
+## 幂等与投递状态机
+
+`resolveCardActionToRetry` 内置防脏状态保护，网络超时或用户并发点击不会产生
+重复 retry：
+
+1. continuation 状态机：`waiting -> confirmed -> delivered`；
+   投递失败用 `markRetryFailed` 回滚到 `waiting`（记录 `delivery_failures`），
+   卡片回到可点击状态。
+2. 一旦 `confirmed`/`delivered`，同一 operation 的后续点击返回
+   `duplicate: true` 的原始 resolution，不再生成新的 retry request——
+   双击、回调重放、慢传输都安全。
+3. 每次确认会把 `resolved_action` / `resolved_retry_request` 存进
+   continuation store，重复点击返回的是首次结果，而不是重新计算。
 
 ## Auth Orchestration
 

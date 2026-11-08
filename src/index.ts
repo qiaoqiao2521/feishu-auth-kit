@@ -19,6 +19,10 @@ export * from './flush-controller.js';
 export * from './streaming-card.js';
 export * from './reactions.js';
 export * from './interactive-dispatcher.js';
+export * from './card-templates.js';
+export * from './card-simulator.js';
+export * from './autoloop.js';
+
 
 import { ScopeGrant, TenantAccessToken } from './models.js';
 export type AppScope = ScopeGrant;

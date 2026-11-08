@@ -322,4 +322,101 @@ export class FeishuAuthClient {
       opFrom: options.opFrom,
     });
   }
+
+  async sendMessage(
+    receiveId: string,
+    msgType: "text" | "interactive" | "post",
+    content: Record<string, any> | string,
+    receiveIdType: "chat_id" | "open_id" | "user_id" = "chat_id"
+  ): Promise<{ message_id: string; raw: any }> {
+    const contentStr = typeof content === "string" ? content : JSON.stringify(content);
+    const payload = await this.requestWithTenantToken("/open-apis/im/v1/messages", {
+      method: "POST",
+      params: { receive_id_type: receiveIdType },
+      body: {
+        receive_id: receiveId,
+        msg_type: msgType,
+        content: contentStr,
+      },
+    });
+    return {
+      message_id: String(payload?.data?.message_id || ""),
+      raw: payload,
+    };
+  }
+
+  async sendText(
+    receiveId: string,
+    text: string,
+    receiveIdType: "chat_id" | "open_id" | "user_id" = "chat_id"
+  ): Promise<{ message_id: string; raw: any }> {
+    return this.sendMessage(receiveId, "text", { text }, receiveIdType);
+  }
+
+  async sendCard(
+    receiveId: string,
+    card: Record<string, any>,
+    receiveIdType: "chat_id" | "open_id" | "user_id" = "chat_id"
+  ): Promise<{ message_id: string; raw: any }> {
+    return this.sendMessage(receiveId, "interactive", card, receiveIdType);
+  }
+
+  async replyMessage(
+    messageId: string,
+    msgType: "text" | "interactive",
+    content: Record<string, any> | string,
+    replyInThread: boolean = true
+  ): Promise<{ message_id: string; raw: any }> {
+    const contentStr = typeof content === "string" ? content : JSON.stringify(content);
+    const payload = await this.requestWithTenantToken(
+      `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
+      {
+        method: "POST",
+        body: {
+          msg_type: msgType,
+          content: contentStr,
+          reply_in_thread: replyInThread,
+        },
+      }
+    );
+    return {
+      message_id: String(payload?.data?.message_id || ""),
+      raw: payload,
+    };
+  }
+
+  async patchCard(messageId: string, card: Record<string, any>): Promise<any> {
+    const contentStr = JSON.stringify(card);
+    return this.requestWithTenantToken(
+      `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "PATCH",
+        body: { content: contentStr },
+      }
+    );
+  }
+
+  async listChatMessages(
+    chatId: string,
+    options?: {
+      pageSize?: number;
+      sortType?: "ByCreateTimeAsc" | "ByCreateTimeDesc";
+      startTime?: string;
+    }
+  ): Promise<Array<Record<string, any>>> {
+    const params: Record<string, string> = {
+      container_id_type: "chat",
+      container_id: chatId,
+      page_size: String(options?.pageSize ?? 20),
+      sort_type: options?.sortType ?? "ByCreateTimeDesc",
+    };
+    if (options?.startTime) {
+      params.start_time = options.startTime;
+    }
+    const payload = await this.requestWithTenantToken("/open-apis/im/v1/messages", {
+      method: "GET",
+      params,
+    });
+    return Array.isArray(payload?.data?.items) ? payload.data.items : [];
+  }
 }

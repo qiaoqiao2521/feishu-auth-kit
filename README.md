@@ -624,3 +624,9 @@ normalization, runner seams, single-card snapshots, and the native card action
 
 `ControlMesh` should include it as a bundled Feishu native runtime component,
 while other hosts may also consume the same module standalone.
+
+## 微信 iLink 实验入口
+
+[协议来源与接入索引](docs/weixin-ilink-index.md)：新增独立的离线文本协议边界，
+不改现有飞书生产链路、不依赖启动 OpenClaw。当前没有扫码登录、网络收发、
+媒体或真实账号验收；不能称微信已经接通。

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { randomUUID } from "node:crypto";
 import type { DeviceToken } from "./models.js";
 
 export function defaultTokenStorePath(): string {
@@ -50,38 +51,69 @@ export class FileTokenStore {
     return `${app_id}:${user_open_id}`;
   }
 
-  private readAll(): Record<string, StoredUserToken> {
-    if (!fs.existsSync(this.path)) {
-      return {};
-    }
-    try {
-      const raw = fs.readFileSync(this.path, "utf-8");
-      const payload = JSON.parse(raw);
-      if (typeof payload !== "object" || payload === null) {
-        return {};
-      }
-      const tokens = (payload as any).tokens ?? payload;
-      if (typeof tokens !== "object" || tokens === null) {
-        return {};
-      }
-      const result: Record<string, StoredUserToken> = {};
-      for (const [key, value] of Object.entries(tokens)) {
-        if (typeof value === "object" && value !== null) {
-          result[key] = value as StoredUserToken;
+  private prepareParent(): void {
+    const parent = path.dirname(this.path);
+    fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+    const info = fs.lstatSync(parent);
+    if (info.isSymbolicLink() || (info.mode & 0o022)) throw new Error("Token storage directory is unsafe");
+  }
+
+  private transaction<T>(operation: () => T): T {
+    this.prepareParent();
+    const lock = `${this.path}.lock`;
+    const deadline = performance.now() + 2000;
+    while (true) {
+      try { fs.mkdirSync(lock, { mode: 0o700 }); break; }
+      catch (error: any) {
+        if (error.code !== "EEXIST") throw error;
+        let info: fs.Stats;
+        try { info = fs.lstatSync(lock); }
+        catch (inspectionError: any) {
+          // The owner released the lock after our mkdir saw EEXIST.
+          if (inspectionError.code === "ENOENT") continue;
+          throw inspectionError;
         }
+        if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("Unsafe token-store lock");
+        if (performance.now() >= deadline) throw new Error("Token store is locked; fence the writer before recovery");
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
       }
-      return result;
-    } catch {
-      return {};
     }
+    try { return operation(); } finally { fs.rmdirSync(lock); }
+  }
+
+  private readAll(): Record<string, StoredUserToken> {
+    let fd: number;
+    try { fd = fs.openSync(this.path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0)); }
+    catch (error: any) { if (error.code === "ENOENT" && !fs.existsSync(this.path)) return {}; throw error; }
+    let payload: any;
+    try {
+      const info = fs.fstatSync(fd);
+      if (!info.isFile() || (info.mode & 0o777) !== 0o600) throw new Error("Token file requires mode 0600; explicit migration is needed");
+      try { payload = JSON.parse(fs.readFileSync(fd, "utf-8")); }
+      catch { throw new Error("Corrupt token store; original data was preserved"); }
+    } finally { fs.closeSync(fd); }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Corrupt token store; original data was preserved");
+    const tokens = Object.prototype.hasOwnProperty.call(payload, "tokens") ? payload.tokens : payload;
+    if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) throw new Error("Corrupt token store; original data was preserved");
+    for (const item of Object.values(tokens) as any[]) {
+      if (!item || typeof item !== "object" || ["app_id", "user_open_id", "access_token"].some(k => typeof item[k] !== "string")) throw new Error("Corrupt token record; original data was preserved");
+    }
+    return tokens;
   }
 
   private writeAll(tokens: Record<string, StoredUserToken>): void {
-    fs.mkdirSync(path.dirname(this.path), { recursive: true });
-    const payload = { tokens };
-    const tempPath = `${this.path}.tmp.${process.pid}.${Date.now()}`;
-    fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    fs.renameSync(tempPath, this.path);
+    const tempPath = `${this.path}.tmp.${randomUUID()}`;
+    const fd = fs.openSync(tempPath, "wx", 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify({ tokens }, null, 2) + "\n", "utf-8");
+      fs.fsyncSync(fd);
+    } catch (error) { fs.closeSync(fd); fs.unlinkSync(tempPath); throw error; }
+    fs.closeSync(fd);
+    try {
+      fs.renameSync(tempPath, this.path);
+      const directory = fs.openSync(path.dirname(this.path), fs.constants.O_RDONLY);
+      try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    } finally { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); }
   }
 
   load(app_id: string, user_open_id: string): StoredUserToken | null {
@@ -102,11 +134,13 @@ export class FileTokenStore {
   }
 
   save(token: StoredUserToken): StoredUserToken {
-    const tokens = this.readAll();
-    const key = FileTokenStore.storageKey(token.app_id, token.user_open_id);
-    tokens[key] = { ...token };
-    this.writeAll(tokens);
-    return token;
+    return this.transaction(() => {
+      const tokens = this.readAll();
+      const key = FileTokenStore.storageKey(token.app_id, token.user_open_id);
+      tokens[key] = { ...token };
+      this.writeAll(tokens);
+      return token;
+    });
   }
 
   saveDeviceToken(
@@ -134,14 +168,14 @@ export class FileTokenStore {
   }
 
   remove(app_id: string, user_open_id: string): boolean {
-    const tokens = this.readAll();
-    const key = FileTokenStore.storageKey(app_id, user_open_id);
-    if (!(key in tokens)) {
-      return false;
-    }
-    delete tokens[key];
-    this.writeAll(tokens);
-    return true;
+    return this.transaction(() => {
+      const tokens = this.readAll();
+      const key = FileTokenStore.storageKey(app_id, user_open_id);
+      if (!(key in tokens)) return false;
+      delete tokens[key];
+      this.writeAll(tokens);
+      return true;
+    });
   }
 
   status(app_id: string, user_open_id: string): TokenStatus {

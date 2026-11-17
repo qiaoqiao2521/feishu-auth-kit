@@ -13,8 +13,10 @@ class ILinkContractTest(unittest.TestCase):
         }
 
     def parse(self, message=None, allowed=None):
-        return parse_text_turn(self.message if message is None else message,
-                               account_id='bot', allowed_senders={'owner'} if allowed is None else allowed)
+        return parse_text_turn(
+            self.message if message is None else message,
+            account_id='bot', allowed_senders={'owner'} if allowed is None else allowed,
+        )
 
     def test_preserves_id_and_text(self):
         turn = self.parse()

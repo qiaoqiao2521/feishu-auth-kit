@@ -1,0 +1,49 @@
+name: Product contracts
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.13']
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: astral-sh/setup-uv@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Install locked dependencies
+        run: |
+          uv sync --frozen --extra dev --extra transport --python "${{ matrix.python }}"
+          pnpm install --frozen-lockfile
+      - name: Offline Python contracts and scoped lint
+        run: |
+          uv run --frozen --extra dev --extra transport pytest -q
+          uv run --frozen --extra dev --extra transport ruff check src tests --exclude tests/test_upstream_watch.py
+      - name: Offline TypeScript contracts and build
+        env:
+          FEISHU_TEST_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: |
+          pnpm test
+          pnpm run typecheck
+          pnpm run build
+      - name: Verify base authentication install without transport
+        env:
+          UV_PROJECT_ENVIRONMENT: .venv-core
+        run: |
+          uv sync --frozen --python "${{ matrix.python }}"
+          .venv-core/bin/python -c "import sys; import feishu_auth_kit; assert 'cryptography' not in sys.modules; assert 'lark_oapi' not in sys.modules"

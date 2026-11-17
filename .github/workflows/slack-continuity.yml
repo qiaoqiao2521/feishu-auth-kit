@@ -1,0 +1,32 @@
+name: Slack continuity offline checks
+on:
+  pull_request:
+  push:
+    branches: [main, 'dot/slack-continuity-*']
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'pytest>=8.3' requests ruff
+      - run: python -m pytest -q
+      - run: ruff check src/feishu_auth_kit/slack*.py tests/test_slack*.py
+  typescript-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build

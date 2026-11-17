@@ -1,6 +1,56 @@
-# feishu-auth-kit
+# feishu-auth-kit → channel-kit
 
 中文 | [English Summary](#english-summary)
+
+本仓库正在评估以现成 Chat SDK 和平台 adapter 组合出多平台 Agent 接入。
+维护范围是配置、授权、账户隔离、模型输入边界、版本锁定与兼容验收；
+飞书旧包名、Python 导入、CLI 和凭证位置继续保留。
+
+当前优先候选是 [Vercel Chat SDK](https://github.com/vercel/chat)。
+跨平台消息、thread、回复和平台连接优先复用它与已有 adapter，
+本草稿不再新增私有 ChannelCore 或 Telegram Bot API 客户端。
+
+| 层次 | 当前处理 |
+| --- | --- |
+| 统一接口 | 已固定 `chat` / Telegram / memory state `4.43.0`，直接组合与离线行为测试通过 |
+| 飞书 | 旧 API 保留；已审 `@larksuite/vercel-chat-adapter@0.3.0` 与官方 Channel SDK，完成导入、构造和类型兼容检查 |
+| QQ Bot | 已审 `@agentor/chat-qq@0.1.1`，完成构造和类型检查；callback 缺签名边界待修复与验收 |
+| 微信 iLink | 已审 `chat-adapter-weixin@0.1.4`，完成构造和类型检查；与腾讯当前登录和 ID 类型的差异待处理 |
+| 企业微信 | 独立评估三种模式，已审发布包；未纳入运行试点 |
+| Satori | 跨语言独立服务的备选，暂未引入；Koishi / NoneBot 等框架也未安装 |
+
+这些候选是开发评估依赖，尚未成为旧飞书生产入口的必需依赖。
+除了 Telegram 的模拟 webhook 往返，其余平台的“可导入 / 可构造”不代表已接通。
+
+### 运行现成 SDK 的离线验证
+
+```bash
+pnpm install --frozen-lockfile
+pnpm test
+pnpm typecheck
+pnpm typecheck:chat
+pnpm build
+pnpm test:package
+```
+
+[组合示例](examples/chat-sdk/telegram.mjs) 直接使用上游 `Chat`、
+`createTelegramAdapter` 和 `createMemoryState`。现有 [独立 HTTP 试点说明](examples/chat-sdk/README.md)
+提供环境模板、启动、身份检查和显式 webhook 注册命令，以及不依赖凭据的 HTTP 回归。
+示例强制 webhook secret、显式 user / chat / topic 授权、每个 bot 独立 state，
+并仅将选出的文字与身份字段交给响应函数。启动不轮询、不自动注册 webhook 或部署服务。
+文本往返已通过隔离验证；真实 Telegram Bot 收发和跨进程恢复仍未验证。
+
+该示例使用内存状态，未实现持久投递账本；SDK 的去重、排队或重连均不代表 exactly-once。
+生产接入仍需核对未知投递、持久状态命名空间、敏感原生标识和真实账号行为。
+不应将 SDK Message / raw / 上游异常对象直接送给模型或写入日志。
+
+评估结论与验收层级见 [迁移说明](docs/channel-kit-migration.md)、
+[复用矩阵](protocols/reuse-matrix.md) 和 [飞书职责对照](protocols/feishu-reuse.md)。
+[复用来源锁定](upstream/reuse-sources.lock.json) 记录确切版本、源码及发布包哈希。
+[上游配置](upstream/targets.json) 现跟踪统一接口、官方通道 SDK 与已核实社区 adapter，
+保留六小时周期和原飞书游标键；GitHub watcher 不代替 registry / 官网资料的版本核对。
+
+以下保留飞书现有能力与使用说明。
 
 `feishu-auth-kit` 是从 `ControlMesh` 抽取出来的飞书第一方模块仓库，负责认证、
 入站消息上下文、runner seam、CardKit 单卡快照，以及
@@ -104,8 +154,8 @@ await card.complete(); // 保留两条消息的正文
 
 - 它不是 ControlMesh 本体。
 - 它不是完整的飞书 bot framework。
-- 它不是飞书 sender。
-- 它不是 callback server。
+- 基础 auth API 不启动 sender；可选 Python transport 提供持久 HTTPS 发送与 WebSocket 入站。
+- 它不是 callback server；宿主提供自己的处理、路由和监督逻辑。
 - 它不是 session router 或 conversation store。
 - 它不会绕过 Feishu/Lark 平台策略、租户审批、应用审核或发布要求。
 - 它不会假装官方飞书流程不存在。
@@ -133,6 +183,14 @@ scan-to-create 走的仍然是官方 Feishu/Lark 注册面。它能把 bot/app �
 - callback endpoint 与卡片点击接入
 - 长时 session memory 与 routing policy
 - transport-specific retry 与生产部署问题
+
+## 可选实时 Transport
+
+Python/Linux 宿主可安装 `.[transport]`，复用已有 CLI profile 的 token provider，
+使用持久 operation/UUID 防重复发送、明确的 `pending/sent/unknown/failed` 状态，
+以及 owner 私聊/单群结构化 @ ACL。线程回复与原始线程路由字段可显式传递。
+现有 Python/TypeScript 认证接口保持兼容。见 [Transport API 与恢复说明](docs/TRANSPORT.md)、
+[状态加固与迁移边界](docs/HARDENING.md)和[可审计上游来源](docs/UPSTREAM-SOURCES.json)。
 
 ## 开发安装
 
@@ -416,8 +474,8 @@ feishu-auth-kit agent action-to-retry \
 - 一个 `feishu-auth-kit.native-retry-request.v1`
 - 一个 `feishu-auth-kit.synthetic-retry.v1`
 
-这个仓库仍然不包含真正的 Feishu sender 或 callback server。像 ControlMesh 这类
-宿主 runtime 可以在后面消费这些 contract。
+基础认证层只构造这些 contract；可选 transport 提供消息传输。像 ControlMesh 这类
+宿主 runtime 负责 callback ingress、运行调度与会话管理。
 
 
 ## Card Studio 与本地模拟器
@@ -617,6 +675,12 @@ uv run pytest -q
 
 ## English Summary
 
+The repository evaluates existing Chat SDK adapters while retaining the Feishu
+package, Python API and CLI. The draft uses direct upstream composition and
+offline compatibility tests; it does not add a private channel protocol or Bot
+API implementation. Telegram has mocked webhook coverage; the other candidates
+have source, package and construction checks only. No live acceptance is claimed.
+
 `feishu-auth-kit` is the extracted first-party Feishu native agent module from
 `ControlMesh`. It owns auth/onboarding primitives, inbound message
 normalization, runner seams, single-card snapshots, and the native card action
@@ -630,3 +694,14 @@ while other hosts may also consume the same module standalone.
 [协议来源与接入索引](docs/weixin-ilink-index.md)：新增独立的离线文本协议边界，
 不改现有飞书生产链路、不依赖启动 OpenClaw。当前没有扫码登录、网络收发、
 媒体或真实账号验收；不能称微信已经接通。
+
+## Slack 连续对话入口（Python）
+
+新增可选的 `feishu-slack-bridge`：已配对的本人 Slack 私聊 → 持久接收账本 →
+Paperclip 原生 Agent Chat。同一私聊持续使用同一个 conversation issue，只有显式
+`/new` 才切换 generation；执行任务完成不会重置协调会话。原飞书入口保持不变。
+未知执行/送达状态只读核对，不盲目重发；只转发绑定来源的成功 run 明确选择的最终评论。
+
+配置、安全边界、运行与故障恢复见 [Slack continuity guide](docs/slack-continuity.md)。
+这是独立 Python CLI，不包含 TypeScript Slack API。部署需要已有授权的 Slack app/
+凭据和本机 `local_trusted` Paperclip；仓库测试不会触发真实消息或模型调用。

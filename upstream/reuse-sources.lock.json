@@ -1,0 +1,601 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-10-31",
+  "scope": "Reuse candidate audit; directory listing, repository source and exact released artifact observations are separate from local runtime or live-platform acceptance",
+  "sources": [
+    {
+      "repository": "vercel/chat",
+      "branch": "main",
+      "commit": "6ce9852ddb0ebd4e122435fafd7dfda8431243ff",
+      "commit_date": "2026-10-31T02:26:27Z",
+      "repository_pushed_at": "2026-10-31T02:26:31Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "apps/docs/content/adapters/vendor-official/lark.mdx",
+          "blob_sha1": "d6834d2611bb148edeba00b1e8b630b51597c760",
+          "sha256": "edcf21af88a92b95f863868a40fe8330e7b4457958a720d82957f447dc1d0188",
+          "bytes": 7508
+        },
+        {
+          "path": "apps/docs/content/adapters/community/qq.mdx",
+          "blob_sha1": "9a3b6c68693e54f70da0b76156c24e6e236164e5",
+          "sha256": "99c2cb2c0bbe7a088e2715a887392c1d7bcbdbb8b8309d9deb0484b311bc9509",
+          "bytes": 3273
+        },
+        {
+          "path": "apps/docs/content/adapters/community/wecom.mdx",
+          "blob_sha1": "0bc9b8170e9ace7ce6635086662bcd2e847c6553",
+          "sha256": "b21c840e3a764fa05e9c39b21079fd2e4060cf6a244ca9a72362f7550f4260ff",
+          "bytes": 4143
+        },
+        {
+          "path": "apps/docs/content/adapters/community/weixin.mdx",
+          "blob_sha1": "d9d0807d6b2032fee4a693a4730332170d391b23",
+          "sha256": "ab2a3fe92611827e4f7c95991aa68b5f500cb4537f3dd2fcda1a5472294fb190",
+          "bytes": 5733
+        }
+      ],
+      "evidence_kind": "directory_or_documentation_source",
+      "retrieval": "GitHub connector, exact commit"
+    },
+    {
+      "repository": "larksuite/node-sdk",
+      "branch": "main",
+      "commit": "b188be60134d409b61259546bcf69c731d2b0b7c",
+      "commit_date": "2026-10-16T06:06:38Z",
+      "repository_pushed_at": "2026-10-16T06:06:39Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "docs/vercel-chat-adapter/README.md",
+          "blob_sha1": "969363bd3a7976538cd7d46407d8f584f37aec15",
+          "sha256": "32c7f517fb400259b299dcfa23c9e047bdc9abedd587914e8a7a1766de2f4d04",
+          "bytes": 6664
+        }
+      ],
+      "evidence_kind": "directory_or_documentation_source",
+      "retrieval": "GitHub connector, exact commit"
+    },
+    {
+      "repository": "DemoMacro/agentor",
+      "branch": "main",
+      "commit": "53a754658096a97a373ccb09a505f0cddb788b63",
+      "commit_date": "2026-08-09T12:42:45Z",
+      "repository_pushed_at": "2026-08-09T12:42:54Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "packages/chat-qq/package.json",
+          "blob_sha1": "080457474ad90b4976736739b71070d227dbb517",
+          "sha256": "a4192bfb2dc015430e8046d2861f5379aa2b9705e8f6fb5654b3916049eda733",
+          "bytes": 1337
+        },
+        {
+          "path": "packages/chat-qq/README.md",
+          "blob_sha1": "e7b0d60b1099afed2f8bd1fa634445a33693a0df",
+          "sha256": "c4c11635b4e23c9eea691c5a6ed363d64b0a61fe996f4d34c8ab9ace503b6600",
+          "bytes": 7538
+        },
+        {
+          "path": "packages/chat-qq/src/adapters/bot.ts",
+          "blob_sha1": "3adcd8b7cfd9b08717ecfbd186e0ce2ff283915a",
+          "sha256": "7c6acefe4377c5fc9b4330c7c53b6d1c8b9abc81b4bdbe47ecef05fbce6dab5d",
+          "bytes": 21490
+        },
+        {
+          "path": "packages/chat-qq/src/adapters/bot-websocket.ts",
+          "blob_sha1": "60dccccd51b21774c261841e9ae85d7639b8d23c",
+          "sha256": "11537f4730169a19271ba8e44a21cff8b05bd51ca152c0787d495d53493eeb3f",
+          "bytes": 5679
+        },
+        {
+          "path": "packages/chat-qq/src/utils.ts",
+          "blob_sha1": "174b1c520169ea15254f1b72ceb8c9c1291e2443",
+          "sha256": "1ee57dab0265072d6d3aff73e474fcf1893e757f007baa5473d0e7e364fadf84",
+          "bytes": 2910
+        },
+        {
+          "path": "packages/chat-wecom/package.json",
+          "blob_sha1": "67ad6f68548868ffa21fe0a230a932d3343cae81",
+          "sha256": "ba1c7859a4f59f05a5cb3cfec988138043e6733ce19231552321aae2e21bdfeb",
+          "bytes": 1445
+        },
+        {
+          "path": "packages/chat-wecom/README.md",
+          "blob_sha1": "747210d5a298f13bf9498358013530ef068dc2b9",
+          "sha256": "6364ab5aec5282c4fbdc31f1abd12ed46f8d7391f79871c6657c1beec97fd8aa",
+          "bytes": 17369
+        },
+        {
+          "path": "packages/chat-wecom/src/adapters/bot.ts",
+          "blob_sha1": "6c2b7e6b587f44dfa877abc6d604f648a3c9edbc",
+          "sha256": "81677bf952870a362f99cb7883851fa2614ac4f254ebe464d300efbe7efadd33",
+          "bytes": 1344
+        },
+        {
+          "path": "packages/chat-wecom/src/adapters/bot-websocket.ts",
+          "blob_sha1": "5c0947400583bdafc8c0473d9b89af1661fc3a54",
+          "sha256": "73a1ed5600c7bd63ae604e38c4c9b8a58186877010490a5e223001dea3db29c1",
+          "bytes": 15169
+        },
+        {
+          "path": "packages/chat-wecom/src/adapters/bot-callback.ts",
+          "blob_sha1": "baca14ebd4d3e78067b0e259f34881210399f37a",
+          "sha256": "e034db883dfc3cf450ab56bea01e92eafaef4cb009f02d1dbb3566207a55c88a",
+          "bytes": 8986
+        },
+        {
+          "path": "packages/chat-wecom/src/adapters/webhook.ts",
+          "blob_sha1": "bc9c0239f6ceaad382064f1fc8e01f254ee5a285",
+          "sha256": "4f0863375c4bb10e3313f46f7008dc758f0bae8364260ee310f5fd413e88d895",
+          "bytes": 7273
+        },
+        {
+          "path": "packages/chat-wecom/src/adapters/app.ts",
+          "blob_sha1": "c68282d8688f1086cfd4cc6091ae2f52f679e51e",
+          "sha256": "a93ab418ee2abff309c5507d4df03b15c7622ecf1ff5a751e6872bcebff70942",
+          "bytes": 19873
+        },
+        {
+          "path": "packages/chat-wecom/src/types.ts",
+          "blob_sha1": "e84f51f18bc0a50daea35ec31899f749e0631176",
+          "sha256": "069a90f77e0e2dd7a2820b719f23af48439ff12ea8c5fdc1f06b0ce6e4887630",
+          "bytes": 10237
+        }
+      ],
+      "evidence_kind": "repository_source",
+      "retrieval": "GitHub connector, exact commit"
+    },
+    {
+      "repository": "wong2/chat-adapter-weixin",
+      "branch": "main",
+      "commit": "62a2b42a26b48f731ef585114017669fccf95ca5",
+      "commit_date": "2026-07-20T07:00:23Z",
+      "repository_pushed_at": "2026-07-20T07:00:26Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "package.json",
+          "blob_sha1": "4558abd60a76abce0c9bb2c5589e03c11e0d7248",
+          "sha256": "be4488ca36dc2e638c4fa235557a78fd9b15b1d46b1a923ba87baba5b5191294",
+          "bytes": 1297
+        },
+        {
+          "path": "README.md",
+          "blob_sha1": "353091908c7d4b6cbc7090eac355d1c95ca8e520",
+          "sha256": "a6b1323a895cde858147ebe28ff9162557b767fa31e438bca44a5e5088b76512",
+          "bytes": 1340
+        },
+        {
+          "path": "src/adapter.ts",
+          "blob_sha1": "ac2b808ceb66740cadbe461c961683a0732bdfcb",
+          "sha256": "1160910ea1d619782529f515859419dede43e1e5e403cb944d9add1bdbf12071",
+          "bytes": 14925
+        },
+        {
+          "path": "src/protocol.ts",
+          "blob_sha1": "08d81174c6b205935a85f1aa95e972a2cda86a41",
+          "sha256": "08de7a94c689e2725be437bfa44366abe8af9274dc39565eeac9e8310ee3f86d",
+          "bytes": 7845
+        },
+        {
+          "path": "src/state.ts",
+          "blob_sha1": "41ad58218af919a814b2d8c082b852c045e27a5b",
+          "sha256": "f745f4a302dbb6c58333d8c39f13b0e0483281b33f79a849874eae4b2c44c557",
+          "bytes": 1833
+        },
+        {
+          "path": "src/login.ts",
+          "blob_sha1": "fa992c66b4b9f36b248477bb73e42186b91434c9",
+          "sha256": "0156f05c869018766d3b8dc1f78da397c409e00d7df6983bb832e37550a776b1",
+          "bytes": 2019
+        },
+        {
+          "path": "src/types.ts",
+          "blob_sha1": "086842741b07f1236eaba141d16f0853281aa6b0",
+          "sha256": "6ca7ee5a9dd7dc3b4954cc56bba3c14a7b11e2230f539ef524c52b663eac3c53",
+          "bytes": 5352
+        }
+      ],
+      "evidence_kind": "repository_source",
+      "retrieval": "GitHub connector, exact commit"
+    }
+  ],
+  "packages": [
+    {
+      "name": "@larksuite/vercel-chat-adapter",
+      "version": "0.3.0",
+      "published_at": "2026-09-14T06:13:53.118Z",
+      "registry_modified_at": "2026-09-14T06:13:53.310Z",
+      "registry_url": "https://registry.npmjs.org/@larksuite/vercel-chat-adapter",
+      "registry_snapshot_sha256": "d79a4285cbec7c3d32f8988e7a92d7b720dbee7ab43ffcefaf885d268f6566a7",
+      "engines": {
+        "node": ">=20"
+      },
+      "dependencies": {
+        "@chat-adapter/shared": "^4.28.1",
+        "@larksuite/channel": "0.7.1"
+      },
+      "peer_dependencies": {
+        "chat": "^4.26.0"
+      },
+      "optional_dependencies": {},
+      "registry_git_head": null,
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/larksuite/vercel-chat-adapter.git"
+      },
+      "dist": {
+        "tarball": "https://registry.npmjs.org/@larksuite/vercel-chat-adapter/-/vercel-chat-adapter-0.3.0.tgz",
+        "integrity": "sha512-KQHYi9zRfRPBNWVSDFGBfuIOnkNkhdUchLOlZw6jXwGKq6AjVPm+LVf4gSeu90kND2EDACUhg/A0Y+ZmESrZLQ==",
+        "shasum": "9a36776de9cb8179d1b997fec601ad23dec74b88"
+      },
+      "runtime_proof_by_this_audit": true,
+      "release_artifact": {
+        "downloaded": true,
+        "sha256": "ffee7f9197b065bfba9c784991e025e20ccf387ce40bb8c33bb79128dbb61dfe",
+        "bytes": 26668,
+        "registry_sha512_integrity_verified": true,
+        "hashed_files": [
+          {
+            "path": "package/package.json",
+            "sha256": "2a626e6b2f0db2e2dc8fa06a62b2650823b4dd4fbf8e0d72bd246054c0af3cb4",
+            "bytes": 1926
+          },
+          {
+            "path": "package/README.md",
+            "sha256": "a93906f876035c6b062bd2a85c19dd54a2b0fdd768491b080635c7b0b5d54c22",
+            "bytes": 10811
+          },
+          {
+            "path": "package/dist/index.js",
+            "sha256": "ba56b00882670bf10b3f263a3f8a273e226b83132aa646f9bb075a7110fddda5",
+            "bytes": 50471
+          },
+          {
+            "path": "package/dist/index.d.ts",
+            "sha256": "70d264a3f149ea26488ab5e618aef14c4dbaf8b64dce01647aafdc558dbb59d0",
+            "bytes": 12033
+          }
+        ],
+        "review_scope": "Package manifest and README; compiled adapter lifecycle, routing, send and state paths; public type exports. Hashes alone do not establish runtime compatibility."
+      },
+      "observed_installed_version": "0.3.0",
+      "runtime_proof_level": "dynamic import and constructor plus typed Chat4.43 composition only; no initialize/connect/login/send",
+      "dependency_changes_by_source_audit": false
+    },
+    {
+      "name": "@agentor/chat-qq",
+      "version": "0.1.1",
+      "published_at": "2026-07-28T01:40:14.163Z",
+      "registry_modified_at": "2026-07-28T01:40:18.750Z",
+      "registry_url": "https://registry.npmjs.org/@agentor/chat-qq",
+      "registry_snapshot_sha256": "22e8f24c6194949baf4b56b8ce8022776457716913e076274f279685693874c5",
+      "engines": null,
+      "dependencies": {
+        "@chat-adapter/shared": "4.35.0"
+      },
+      "peer_dependencies": {
+        "chat": "^4.0.0"
+      },
+      "optional_dependencies": {},
+      "registry_git_head": null,
+      "repository": {
+        "url": "git+https://github.com/DemoMacro/agentor.git",
+        "type": "git"
+      },
+      "dist": {
+        "tarball": "https://registry.npmjs.org/@agentor/chat-qq/-/chat-qq-0.1.1.tgz",
+        "integrity": "sha512-hFthIvH7wP2eU+yal2QpqA3LOEbSL/wacm05pOqlPmzexoe+FJBr4LwjpNiOmmMbr74BFgG+RYZflDOA04T+Cw==",
+        "shasum": "f3329572df270447fe316660d2c5dd22c964bc64"
+      },
+      "runtime_proof_by_this_audit": true,
+      "release_artifact": {
+        "downloaded": true,
+        "sha256": "afa044a6fc262a1850580fc756200e5e3972d55632601250f661e82ea9b97942",
+        "bytes": 11890,
+        "registry_sha512_integrity_verified": true,
+        "hashed_files": [
+          {
+            "path": "package/package.json",
+            "sha256": "64ad1e28cc4d4ff57d4f58f2ca9882dd6430093bf4bf136bf5bfcf36fcbb6865",
+            "bytes": 1307
+          },
+          {
+            "path": "package/README.md",
+            "sha256": "71bb3accf17cd1532646d290daec57d53338e01aa0b63b2910bc2035d564ab66",
+            "bytes": 7732
+          },
+          {
+            "path": "package/dist/index.mjs",
+            "sha256": "12c2eb1f7ac72938784849ca6b0eb4874a6d18dae8a1514bb3443c3c8ddc998b",
+            "bytes": 12875
+          },
+          {
+            "path": "package/dist/index.d.mts",
+            "sha256": "7f7b5775fe0160dc76d198d955a2d5e5b49bfc516d6ed370886e6123869fc6aa",
+            "bytes": 8885
+          }
+        ],
+        "review_scope": "Package manifest and README; compiled adapter lifecycle, routing, send and state paths; public type exports. Hashes alone do not establish runtime compatibility."
+      },
+      "observed_installed_version": "0.1.1",
+      "runtime_proof_level": "dynamic import and constructor plus typed Chat4.43 composition only; no initialize/connect/login/send",
+      "dependency_changes_by_source_audit": false
+    },
+    {
+      "name": "@agentor/chat-wecom",
+      "version": "0.1.3",
+      "published_at": "2026-08-09T12:43:08.994Z",
+      "registry_modified_at": "2026-08-09T12:43:11.056Z",
+      "registry_url": "https://registry.npmjs.org/@agentor/chat-wecom",
+      "registry_snapshot_sha256": "190bcd79c1ddf9359323364db494cf156b8955012c47e04506f1828497564a6f",
+      "engines": null,
+      "dependencies": {
+        "@chat-adapter/shared": "4.35.0"
+      },
+      "peer_dependencies": {
+        "chat": "^4.0.0"
+      },
+      "optional_dependencies": {},
+      "registry_git_head": null,
+      "repository": {
+        "url": "git+https://github.com/DemoMacro/agentor.git",
+        "type": "git"
+      },
+      "dist": {
+        "tarball": "https://registry.npmjs.org/@agentor/chat-wecom/-/chat-wecom-0.1.3.tgz",
+        "integrity": "sha512-GglCIY/xRtlfmKnHSbhpid5wKtE1gFwPuNCVRP/vQ3YZt5Q9hj0Ych+g/3GXE0bXy6tLFhGhtWsmG0Ar/1hhoQ==",
+        "shasum": "3c263cbbc9bad4cf22879052306ca59ef1eae9da"
+      },
+      "runtime_proof_by_this_audit": false,
+      "release_artifact": {
+        "downloaded": true,
+        "sha256": "291ceb5923ad898d0118a17020a3f98c1968a016b85c2c96dceeef59b4a52528",
+        "bytes": 21693,
+        "registry_sha512_integrity_verified": true,
+        "hashed_files": [
+          {
+            "path": "package/package.json",
+            "sha256": "cd3378c892dcd7c180d689316f90e4c432cf8a3939a709c708b4226356c0d6c9",
+            "bytes": 1415
+          },
+          {
+            "path": "package/README.md",
+            "sha256": "6364ab5aec5282c4fbdc31f1abd12ed46f8d7391f79871c6657c1beec97fd8aa",
+            "bytes": 17369
+          },
+          {
+            "path": "package/dist/index.mjs",
+            "sha256": "ebaae0c453c53b45712312b23874820f61bff5e833d956e86abac2e012c16880",
+            "bytes": 32445
+          },
+          {
+            "path": "package/dist/index.d.mts",
+            "sha256": "04f0ff8006e4fee6cfc54cdd70650fbb728dc3657152a0c2d2066a3fc2cfc34b",
+            "bytes": 21442
+          }
+        ],
+        "review_scope": "Package manifest and README; compiled adapter lifecycle, routing, send and state paths; public type exports. Hashes alone do not establish runtime compatibility."
+      },
+      "dependency_changes_by_source_audit": false
+    },
+    {
+      "name": "chat-adapter-weixin",
+      "version": "0.1.4",
+      "published_at": "2026-07-20T07:02:45.589Z",
+      "registry_modified_at": "2026-07-20T07:02:45.711Z",
+      "registry_url": "https://registry.npmjs.org/chat-adapter-weixin",
+      "registry_snapshot_sha256": "602e3cda8636666328f7f4d842d05d44df90a9c7a5ef42bba086ab1ce63df04f",
+      "engines": {
+        "node": ">=22"
+      },
+      "dependencies": {
+        "@chat-adapter/shared": "^4.31.0",
+        "qrcode-terminal": "^0.12.0"
+      },
+      "peer_dependencies": {
+        "chat": "^4.31.0"
+      },
+      "optional_dependencies": {
+        "silk-wasm": "^3.7.1"
+      },
+      "registry_git_head": "62a2b42a26b48f731ef585114017669fccf95ca5",
+      "repository": null,
+      "dist": {
+        "tarball": "https://registry.npmjs.org/chat-adapter-weixin/-/chat-adapter-weixin-0.1.4.tgz",
+        "integrity": "sha512-1MeoYuku+cB0rsoiGl0y/1sZ60IbiqbPTv13aSpPVBwV0b01YGOnBwFW1Yd+lfcHACQUIL/C/gopVJariGZUuA==",
+        "shasum": "730c33bd051f5337d4f82fbb8b39a29a410478c3"
+      },
+      "runtime_proof_by_this_audit": true,
+      "release_artifact": {
+        "downloaded": true,
+        "sha256": "a616ef1945bdcf99c8c468a0d332590b45f6d638cab786bcc39c26169f063464",
+        "bytes": 40971,
+        "registry_sha512_integrity_verified": true,
+        "hashed_files": [
+          {
+            "path": "package/package.json",
+            "sha256": "be4488ca36dc2e638c4fa235557a78fd9b15b1d46b1a923ba87baba5b5191294",
+            "bytes": 1297
+          },
+          {
+            "path": "package/README.md",
+            "sha256": "a6b1323a895cde858147ebe28ff9162557b767fa31e438bca44a5e5088b76512",
+            "bytes": 1340
+          },
+          {
+            "path": "package/dist/index.js",
+            "sha256": "7fe566deca7793b2991c5c9e5f9743e70be8828438d8713d60bd89555fe62c24",
+            "bytes": 37319
+          },
+          {
+            "path": "package/dist/index.d.ts",
+            "sha256": "15a58a6a069595784bd6d836337dd85637319793fec33c86ca89299a14cee75f",
+            "bytes": 8901
+          }
+        ],
+        "review_scope": "Package manifest and README; compiled adapter lifecycle, routing, send and state paths; public type exports. Hashes alone do not establish runtime compatibility."
+      },
+      "observed_installed_version": "0.1.4",
+      "runtime_proof_level": "dynamic import and constructor plus typed Chat4.43 composition only; no initialize/connect/login/send",
+      "dependency_changes_by_source_audit": false
+    },
+    {
+      "name": "chat",
+      "version": "4.43.0",
+      "published_at": "2026-10-19T10:21:21.557Z",
+      "registry_modified_at": "2026-10-19T10:21:21.990Z",
+      "registry_url": "https://registry.npmjs.org/chat",
+      "registry_snapshot_sha256": "31dcacca99946b7b3f5f846028517d16ef61787ba43286c531417fdfd97669f6",
+      "engines": {
+        "node": ">=20"
+      },
+      "dependencies": {
+        "remend": "^1.2.1",
+        "unified": "^11.0.5",
+        "remark-gfm": "^4.0.0",
+        "remark-parse": "^11.0.0",
+        "@workflow/serde": "4.1.0-beta.2",
+        "remark-stringify": "^11.0.0",
+        "mdast-util-to-string": "^4.0.0",
+        "@chat-adapter/catalog": "4.43.0"
+      },
+      "peer_dependencies": {
+        "ai": "^6.0.182 || ^7.0.0",
+        "zod": "^3.0.0 || ^4.0.0",
+        "workflow": "^5.0.0-beta.35"
+      },
+      "optional_dependencies": {},
+      "registry_git_head": null,
+      "repository": {
+        "url": "git+https://github.com/vercel/chat.git",
+        "type": "git",
+        "directory": "packages/chat"
+      },
+      "dist": {
+        "tarball": "https://registry.npmjs.org/chat/-/chat-4.43.0.tgz",
+        "integrity": "sha512-9ICxMewK1+4J0pEbR7eMBTh3JCL3NkyDHAgGrU/gblyyw/+QUcwFHCXIoQMt0Xlyup1c5smS0/gYytTt8NVc6w==",
+        "shasum": "c9c53c008d8e120ee3356397ffaa73b254727076"
+      },
+      "runtime_proof_by_this_audit": false,
+      "release_artifact": {
+        "downloaded": false,
+        "registry_integrity_is_metadata_only": true
+      },
+      "dependency_changes_by_source_audit": false,
+      "observed_installed_version": "4.43.0"
+    }
+  ],
+  "official_service_documentation": [
+    {
+      "url": "https://satori.chat/zh-CN/introduction.html",
+      "retrieved_on": "2026-10-31",
+      "sha256": "2dcdf8dfec8fc2eb55d1ebc5d901d43bb318ca9cce7ddb247aae7e05088151b6",
+      "bytes": 1636,
+      "hash_subject": "Firecrawl returned markdown UTF-8, not origin HTTP bytes",
+      "evidence_kind": "official_documentation",
+      "protocol_version": null
+    },
+    {
+      "url": "https://satori.chat/zh-CN/protocol/events.html",
+      "retrieved_on": "2026-10-31",
+      "sha256": "6907af3e2164b15c173b5477aa842ab9f816374a6e107ef42b80b1eee2135589",
+      "bytes": 7383,
+      "hash_subject": "Firecrawl returned markdown UTF-8, not origin HTTP bytes",
+      "evidence_kind": "official_documentation",
+      "protocol_version": "v1 as stated in retrieved document"
+    },
+    {
+      "url": "https://satori.chat/zh-CN/protocol/api.html",
+      "retrieved_on": "2026-10-31",
+      "sha256": "01e8549dd373a4ee7b51fc6f73065507ec8972268048ccb2d89ab0df9c527199",
+      "bytes": 5146,
+      "hash_subject": "Firecrawl returned markdown UTF-8, not origin HTTP bytes",
+      "evidence_kind": "official_documentation",
+      "protocol_version": "v1 as stated in retrieved document"
+    },
+    {
+      "url": "https://satori.chat/zh-CN/adapters/qq.html",
+      "retrieved_on": "2026-10-31",
+      "sha256": "8dacf110a777eb55cf27421752853cc20ffac397e57463bfc0211b066a78b0c4",
+      "bytes": 1964,
+      "hash_subject": "Firecrawl returned markdown UTF-8, not origin HTTP bytes",
+      "evidence_kind": "official_documentation",
+      "protocol_version": null
+    }
+  ],
+  "unavailable_sources": [
+    {
+      "repository": "larksuite/vercel-chat-adapter",
+      "observed_result": "GitHub connector repository metadata GET returned404",
+      "fallback": "Inspected and hashed npm @larksuite/vercel-chat-adapter0.3.0 exact artifact; no repository commit claimed"
+    }
+  ],
+  "redirects": [
+    {
+      "from": "https://github.com/wong2/weixin-chat-adapter",
+      "to": "https://github.com/wong2/chat-adapter-weixin",
+      "evidence": "HTTPS HEAD followed redirect"
+    }
+  ],
+  "official_protocol_comparison": {
+    "lock_file": "upstream/sources.lock.json",
+    "qq_commit": "89988812442583bf47c34b89f9abf5fd4b85df0b",
+    "weixin_commit": "874637a0dbc24050f72d1385add4fc6170a2d726"
+  },
+  "local_runtime_proof": {
+    "status": "passed",
+    "level": "candidate exports and construction only",
+    "node": "24.19.0",
+    "chat": "4.43.0",
+    "state_adapter": "@chat-adapter/state-memory@4.43.0",
+    "candidate_versions": {
+      "@larksuite/vercel-chat-adapter": "0.3.0",
+      "@agentor/chat-qq": "0.1.1",
+      "chat-adapter-weixin": "0.1.4"
+    },
+    "tests": {
+      "command": "pnpm exec vitest run tests/chat-sdk-candidates.test.ts",
+      "passed": 3,
+      "total": 3
+    },
+    "typecheck": {
+      "command": "pnpm typecheck",
+      "passed": true
+    },
+    "network_guard": "fetch and WebSocket denied before dynamic imports; zero calls and zero created timers asserted",
+    "initialize_called": false,
+    "connect_called": false,
+    "platform_calls": false,
+    "wecom": "source/artifact audit only; not installed or constructed in this proof"
+  },
+  "live_platform_acceptance": false,
+  "evaluated_chat_sdk": {
+    "version": "4.43.0",
+    "release_commit": "7c351d2f87377dd9e638c3cbdf71d31519775e84",
+    "packages": [
+      "chat",
+      "@chat-adapter/telegram",
+      "@chat-adapter/state-memory"
+    ],
+    "dependency_scope": "devDependencies only; exact versions and integrity in pnpm-lock.yaml",
+    "offline_proof": [
+      "real SDK webhook/reply composition",
+      "topic and scoped grants",
+      "cards and callbacks",
+      "draft versus final send",
+      "network ambiguity without automatic resend",
+      "separate account state",
+      "raw serialization boundary",
+      "core dedupe failure and queue coalescing semantics"
+    ],
+    "test_files": [
+      "tests/chat-sdk-integration.test.ts",
+      "tests/chat-sdk-adapter.test.ts",
+      "tests/chat-sdk-semantics.test.ts"
+    ],
+    "live_acceptance": false
+  }
+}

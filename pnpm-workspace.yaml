@@ -1,2 +1,4 @@
 allowBuilds:
   esbuild: true
+  # Version-warning hook only; candidate SDKs use the published JS files.
+  protobufjs: false

@@ -9,4 +9,15 @@ build/
 *.egg-info/
 node_modules/
 .upstream-watch/
+.env.telegram
 
+
+# Optional transport local environments, configuration and runtime state
+.venv*/
+.env
+.env.*
+.feishu-auth.env
+*.enc
+*.key
+*.sqlite3*
+transport-state/

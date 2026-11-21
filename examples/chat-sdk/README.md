@@ -13,10 +13,18 @@
 不要用 `--prod` 安装，也不要在飞书生产部署目录切分支或启动。
 
 ```bash
-git clone --branch feat/channel-kit-migration https://github.com/qiaoqiao2521/feishu-auth-kit.git telegram-pilot
+git clone --branch main https://github.com/qiaoqiao2521/feishu-auth-kit.git telegram-pilot
 cd telegram-pilot
 pnpm install --frozen-lockfile
 pnpm test:telegram
+```
+
+`pnpm test:telegram` 使用本地模拟 Bot API 验证 HTTP 文本往返，
+无需真实 Bot 凭据或公网 HTTPS。离线验证到此完成，
+不代表 Telegram 客户端真实收发通过。
+只有准备进行真实 Bot 验收时，才继续：
+
+```bash
 cp examples/chat-sdk/telegram.env.example .env.telegram
 chmod 600 .env.telegram
 ```

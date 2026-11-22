@@ -3,13 +3,12 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
-
-from atomic_json_io import atomic_write_json
 
 from .models import DeviceToken
 
@@ -123,7 +122,23 @@ class FileTokenStore:
         return tokens
 
     def _write_all(self, tokens: dict[str, dict[str, Any]]) -> None:
-        atomic_write_json(self.path, {"tokens": tokens})
+        self._prepare_parent()
+        fd, name = tempfile.mkstemp(prefix="." + self.path.name + "-", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"tokens": tokens}, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(name, self.path)
+            directory_fd = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)
 
     def load(self, app_id: str, user_open_id: str) -> StoredUserToken | None:
         item = self._read_all().get(self.storage_key(app_id, user_open_id))

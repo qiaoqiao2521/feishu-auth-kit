@@ -2,7 +2,19 @@
 
 来源：[Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin/tree/874637a0dbc24050f72d1385add4fc6170a2d726)，提交 `874637a0dbc24050f72d1385add4fc6170a2d726`，提交日期 2026-10-13，核对日期 2026-10-31。package.json 声明版本 `2.4.10`。文件哈希见 [锁文件](../upstream/sources.lock.json)。
 
-本 kit 当前没有微信 adapter。官方 [protocol_zh_CN.md](https://github.com/Tencent/openclaw-weixin/blob/874637a0dbc24050f72d1385add4fc6170a2d726/docs/protocol_zh_CN.md) 明确指出：文档根据客户端代码编写，类型字段可选不代表服务端接受省略，也不保证类型中列出的能力已实现。以下保留这个证据边界。
+本 kit 当前没有在线微信接入。`chat-adapter-weixin@0.1.4` 是开发评估依赖；已有的 [Python 离线文本边界](../src/feishu_auth_kit/weixin_ilink.py) 不包含登录、网络收发或持久恢复。官方 [protocol_zh_CN.md](https://github.com/Tencent/openclaw-weixin/blob/874637a0dbc24050f72d1385add4fc6170a2d726/docs/protocol_zh_CN.md) 明确指出：文档根据客户端代码编写，类型字段可选不代表服务端接受省略，也不保证类型中列出的能力已实现。以下保留这个证据边界。
+
+## Issue #17：owner 与 context token 离线复核（2026-11-22）
+
+本节补充 [Issue #17](https://github.com/qiaoqiao2521/feishu-auth-kit/issues/17)，不改写下方 2026-10-13 历史基线。审查本仓 `8853f90c6b78a8e01a75f812245f62a86d77442f`，保持 Chat `4.43.0` 和社区 adapter `0.1.4` 不变。
+
+- 腾讯 [`fa0ab86`](https://github.com/Tencent/openclaw-weixin/commit/fa0ab862f53ae56532dbb8153f1a431de02e79dc) 将入站 sender 与扫码后保存的 `userId` 比对；不匹配时在命令处理、AI 派发和 token 写入前拒绝。它不是扫码时校验预先指定的 owner。缺失或空白 owner 时仍兼容普通消息，但不授权命令，不能称为全面 fail-closed。强制 PIN 开关也非默认开启；显式开启时才请求 `bot_spam_business_data=base64(JSON({verify_pin:1}))`，未开启时由服务端决定。
+- 社区 `0.1.4` 返回扫码 `userId`，但允许缺失，且没有入站 owner 策略。非 owner 消息会被交给 Chat handler，token 在 handler 前写入 state；宿主必须在任何 Agent/工具执行前实施受信 owner 策略。其 GET 扫码请求未携带强制 PIN 字段，`need_verifycode` / `confirmed_but_need_verifycode` 在离线回放中只会等到超时。这里证明客户端差异，不证明真实服务必然拒绝旧客户端。
+- 腾讯 [`808e099`](https://github.com/Tencent/openclaw-weixin/commit/808e099e47efd108c4bbc40f5fa4afc5409ca5ae) 在内存 miss 时补读同账号的 token 文件，并保留已有内存值，修复未执行 `startAccount` 的 CLI/cron 等独立进程；网关已有显式启动恢复。该补丁不延长服务端 token 有效期。
+- 社区 `0.1.4` 每次发送直接读取 `StateAdapter` 的 `weixin:<accountId>:<userId>:context_token`，没有腾讯的第二层私有 Map。正常账号/用户命名空间隔离，`postMessage` 拒绝其他账号的 thread；`startTyping` 却忽略 thread 账号，仍使用当前账号 token。重启后能否恢复取决于 state 持久性；内存 state 会丢失，缺 token 时仍尝试发送。不能机械移植腾讯磁盘补读，也不能把本地 30 天 TTL 当成平台有效期。
+- 本仓 Python 边界拒绝空白名单、未授权/缺失 sender、错误收件账号与缺 token；它实现的是宿主显式白名单，不是扫码 owner 自动绑定。每个 turn 保留自身 token，但无法鉴定不透明 token 的平台归属。宿主必须认证接收通道、保存账号来源，并按 `turn.account_id` 选择发送凭据；`to_dict()` 故意没有 token，不能用于凭据恢复。社区包也不检查入站 `to_user_id`：合成错路由回包可以污染当前账号 state，但没有证据真实服务会错投这种回包。
+
+新增 [发布包行为测试](../tests/chat-sdk-weixin-security.test.ts) 与 [重启夹具](../tests/fixtures/weixin-restart.mjs)，并扩展 [Python 边界测试](../tests/test_weixin_ilink.py)。复验命令：`pnpm exec vitest run tests/chat-sdk-weixin-security.test.ts`；`PYTHONPATH=src python -m unittest discover -s tests -p test_weixin_ilink.py -v`。重启夹具使用不同 OS 进程及测试专用文件 state，不是新增生产存储。所有平台 HTTP 均被替换；行为测试通过包含“缺口复现成功”，不等于授权安全或真实微信验收通过。
 
 ## 二维码登录与鉴权
 

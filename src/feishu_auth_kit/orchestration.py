@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import requests
+from atomic_json_io import atomic_write_json
 
 from .models import DeviceAuthorization
 from .runtime_cards import (
@@ -85,13 +86,7 @@ class FilePendingFlowRegistry:
         return {str(key): value for key, value in items.items() if isinstance(value, dict)}
 
     def _write_all(self, items: dict[str, dict[str, Any]]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        temp_path.write_text(
-            json.dumps({"pending_flows": items}, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        temp_path.replace(self.path)
+        atomic_write_json(self.path, {"pending_flows": items})
 
     def load(self, flow_key: str) -> PendingAuthFlow | None:
         item = self._read_all().get(flow_key)

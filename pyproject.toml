@@ -13,8 +13,12 @@ authors = [
   { name = "Ductor Workspace Agent" },
 ]
 dependencies = [
+  "atomic-json-io>=0.1.0",
   "requests>=2.32.0",
 ]
+
+[tool.uv.sources]
+atomic-json-io = { path = "../atomic-json-io", editable = true }
 
 [project.optional-dependencies]
 transport = [

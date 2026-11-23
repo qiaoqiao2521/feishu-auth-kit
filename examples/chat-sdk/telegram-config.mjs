@@ -39,5 +39,6 @@ export function readTelegramConfig(env = process.env) {
 export function permits(grants, message) {
   return message.from?.is_bot === false && grants.some((g) =>
     g.userId === String(message.from.id) && g.chatId === String(message.chat.id)
-    && (g.topicId === undefined || g.topicId === message.message_thread_id));
+    && (g.topicId === undefined
+      || (message.is_topic_message === true && g.topicId === message.message_thread_id)));
 }

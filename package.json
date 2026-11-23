@@ -35,7 +35,7 @@
     "@types/node": "^26.6.6",
     "chat": "4.43.0",
     "chat-adapter-weixin": "0.1.4",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

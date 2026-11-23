@@ -7,8 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from atomic_json_io import atomic_write_json
-
+from ._atomic_json import atomic_write_json
 from .models import DeviceAuthorization
 
 

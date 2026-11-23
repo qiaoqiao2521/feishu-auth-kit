@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 import requests
-from atomic_json_io import atomic_write_json
 
+from ._atomic_json import atomic_write_json
 from .models import DeviceAuthorization
 from .runtime_cards import (
     ContinuationState,

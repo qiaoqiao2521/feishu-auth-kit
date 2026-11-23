@@ -105,11 +105,28 @@ describe('standalone Telegram text pilot over isolated HTTP', () => {
   });
   it('enforces topic scope and preserves the permitted reply topic', async () => {
     const { url } = await start({}, { grants: [{ userId: '42', chatId: '-10042', topicId: 9 }] });
-    const message = { chat: { id: -10042, type: 'supergroup' }, message_thread_id: 10 };
+    const message = { chat: { id: -10042, type: 'supergroup' },
+      message_thread_id: 10, is_topic_message: true };
     expect(await (await post(url, update(1, message))).json()).toEqual({ status: 'denied' });
     expect(calls).toEqual([]);
     expect((await post(url, update(2, { ...message, message_thread_id: 9 }))).status).toBe(200);
     expect(sends()[0].body).toMatchObject({ chat_id: '-10042', message_thread_id: 9 });
+  });
+  it.each([undefined, false])('denies a reply chain without an explicit topic flag %s before SDK side effects', async (topicFlag) => {
+    const { url } = await start({}, { grants: [{ userId: '42', chatId: '-10042', topicId: 9 }] });
+    const message = { chat: { id: -10042, type: 'supergroup' }, message_thread_id: 9,
+      ...(topicFlag === undefined ? {} : { is_topic_message: topicFlag }) };
+    expect(await (await post(url, update(1, message))).json()).toEqual({ status: 'denied' });
+    expect(calls).toEqual([]);
+  });
+  it('answers ordinary supergroup replies on the chat when the grant is not topic-scoped', async () => {
+    const { url } = await start({}, { grants: [{ userId: '42', chatId: '-10042' }] });
+    const message = { chat: { id: -10042, type: 'supergroup' }, message_thread_id: 9,
+      reply_to_message: update(0).message };
+    expect((await post(url, update(1, message))).status).toBe(200);
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0].body).toMatchObject({ chat_id: '-10042', text: 'Echo: hello acceptance' });
+    expect(sends()[0].body).not.toHaveProperty('message_thread_id');
   });
   it('suppresses simultaneous and sequential duplicate deliveries in one instance', async () => {
     const { url } = await start();

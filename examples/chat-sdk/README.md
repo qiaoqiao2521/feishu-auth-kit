@@ -13,16 +13,24 @@
 不要用 `--prod` 安装，也不要在飞书生产部署目录切分支或启动。
 
 ```bash
-git clone --branch feat/channel-kit-migration https://github.com/qiaoqiao2521/feishu-auth-kit.git telegram-pilot
+git clone --branch main https://github.com/qiaoqiao2521/feishu-auth-kit.git telegram-pilot
 cd telegram-pilot
 pnpm install --frozen-lockfile
 pnpm test:telegram
+```
+
+`pnpm test:telegram` 使用本地模拟 Bot API 验证 HTTP 文本往返，
+无需真实 Bot 凭据或公网 HTTPS。离线验证到此完成，
+不代表 Telegram 客户端真实收发通过。
+只有准备进行真实 Bot 验收时，才继续：
+
+```bash
 cp examples/chat-sdk/telegram.env.example .env.telegram
 chmod 600 .env.telegram
 ```
 
 所有命令均在仓库根目录运行。`chat`、Telegram adapter、memory state 保持锁定
-`4.43.0`；本补丁没有新增依赖。`.env.telegram` 已忽略，勿提交真实 token。
+`4.45.0`；本补丁没有新增依赖。`.env.telegram` 已忽略，勿提交真实 token。
 Node 的 `--env-file` 不覆盖已有进程环境变量；若机器已有同名变量，先在干净终端
 核对其来源。CLI 不读取 `TELEGRAM_API_BASE_URL`，不会把 token 发到自定义 API 地址。
 

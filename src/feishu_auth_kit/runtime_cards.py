@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ._atomic_json import atomic_write_json
 from .models import DeviceAuthorization
 
 
@@ -100,13 +101,7 @@ class FileContinuationStore:
         return {str(key): value for key, value in states.items() if isinstance(value, dict)}
 
     def _write_all(self, items: dict[str, dict[str, Any]]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        temp_path.write_text(
-            json.dumps({"continuations": items}, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        temp_path.replace(self.path)
+        atomic_write_json(self.path, {"continuations": items})
 
     def save(self, state: ContinuationState) -> ContinuationState:
         items = self._read_all()

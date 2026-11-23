@@ -68,6 +68,34 @@ class ILinkContractTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_text_turn(self.message, account_id='other', allowed_senders={'owner'})
 
+    def test_missing_sender_and_token_fail_closed(self):
+        for field in ['from_user_id', 'context_token']:
+            for value in [None, '', '   ']:
+                with self.subTest(field=field, value=value):
+                    bad = dict(self.message, **{field: value})
+                    if value is None:
+                        bad.pop(field)
+                    with self.assertRaises(ValueError):
+                        self.parse(bad)
+
+    def test_interleaved_accounts_keep_their_own_reply_context(self):
+        turns = [parse_text_turn(
+            dict(self.message, to_user_id=account, context_token=f'context-{account}'),
+            account_id=account, allowed_senders={'owner'},
+        ) for account in ['bot-a', 'bot-b']]
+        for turn in [turns[1], turns[0], turns[1]]:
+            reply = build_text_reply(turn, 'answer', client_id=f'{turn.account_id}-operation')
+            self.assertEqual(reply['msg']['context_token'], f'context-{turn.account_id}')
+            self.assertEqual(reply['msg']['to_user_id'], 'owner')
+            self.assertNotIn('context_token', turn.to_dict())
+
+    def test_opaque_token_provenance_remains_a_trusted_host_precondition(self):
+        # A synthetic label is not a platform signature: this pure parser cannot
+        # authenticate a token or the credentials that a future sender will use.
+        turn = self.parse(dict(self.message, context_token='claimed-other-account-token'))
+        self.assertEqual(turn.account_id, 'bot')
+        self.assertEqual(turn.context_token, 'claimed-other-account-token')
+
 
 if __name__ == '__main__':
     unittest.main()

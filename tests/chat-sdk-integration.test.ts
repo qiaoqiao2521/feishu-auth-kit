@@ -31,6 +31,7 @@ function pilot(options = {}) {
 }
 async function receive(bot: ReturnType<typeof createTelegramPilot>, options: {
   id?: number; senderId?: number; chatId?: number; secret?: string | null; threadId?: number;
+  isTopicMessage?: boolean;
 } = {}) {
   const tasks: Promise<unknown>[] = [];
   const secret = options.secret === undefined ? 'fake-secret' : options.secret;
@@ -42,6 +43,7 @@ async function receive(bot: ReturnType<typeof createTelegramPilot>, options: {
       from: { id: options.senderId ?? 42, is_bot: false, first_name: 'Owner' },
       chat: { id: options.chatId ?? 42, type: options.threadId ? 'supergroup' : 'private' },
       ...(options.threadId ? { message_thread_id: options.threadId } : {}),
+      ...(options.isTopicMessage === undefined ? {} : { is_topic_message: options.isTopicMessage }),
       private_transport_value: 'DO_NOT_SERIALIZE',
     } }),
   }), { waitUntil: (promise) => tasks.push(promise) });
@@ -80,9 +82,9 @@ describe('reuse-first Telegram composition pilot', () => {
   it('applies topic scope before calling the response handler', async () => {
     const respond = vi.fn(async () => 'topic answer'); const bot = pilot({ respond,
       grants: [{ userId: '42', chatId: '-10042', topicId: 9 }] });
-    await receive(bot, { id: 1, chatId: -10042, threadId: 10 });
+    await receive(bot, { id: 1, chatId: -10042, threadId: 10, isTopicMessage: true });
     expect(respond).not.toHaveBeenCalled();
-    await receive(bot, { id: 2, chatId: -10042, threadId: 9 });
+    await receive(bot, { id: 2, chatId: -10042, threadId: 9, isTopicMessage: true });
     expect(respond).toHaveBeenCalledOnce();
     expect(calls.find((call) => call.method === 'sendMessage')?.body)
       .toMatchObject({ chat_id: '-10042', message_thread_id: 9 });

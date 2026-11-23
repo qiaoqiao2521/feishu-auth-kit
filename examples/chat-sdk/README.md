@@ -30,7 +30,7 @@ chmod 600 .env.telegram
 ```
 
 所有命令均在仓库根目录运行。`chat`、Telegram adapter、memory state 保持锁定
-`4.43.0`；本补丁没有新增依赖。`.env.telegram` 已忽略，勿提交真实 token。
+`4.45.0`；本补丁没有新增依赖。`.env.telegram` 已忽略，勿提交真实 token。
 Node 的 `--env-file` 不覆盖已有进程环境变量；若机器已有同名变量，先在干净终端
 核对其来源。CLI 不读取 `TELEGRAM_API_BASE_URL`，不会把 token 发到自定义 API 地址。
 

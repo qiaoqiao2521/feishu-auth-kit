@@ -50,7 +50,7 @@ describe('released Chat SDK Telegram adapter', () => {
     const calls = setupFetch();
     const telegram = adapter();
     const message = telegram.parseMessage(rawMessage({
-      chat: { id: -10042, type: 'supergroup' }, message_thread_id: 55,
+      chat: { id: -10042, type: 'supergroup' }, message_thread_id: 55, is_topic_message: true,
       text: undefined, caption: 'photo caption',
       photo: [{ file_id: 'opaque-file', file_unique_id: 'stable-file', width: 80, height: 60 }],
       reply_to_message: rawMessage({ message_id: 6, text: 'earlier' }),
